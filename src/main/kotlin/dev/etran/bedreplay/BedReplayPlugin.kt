@@ -31,6 +31,7 @@ class BedReplayPlugin : JavaPlugin() {
 
     private var recorder: RecordingManager? = null
     private var playback: PlaybackController? = null
+    private var spectate: dev.etran.bedreplay.playback.SpectateListener? = null
     private var playerSettingsStore: PlayerSettingsStore? = null
     private var capture: PacketCapture? = null
     private var cleanupTask: BukkitTask? = null
@@ -85,6 +86,8 @@ class BedReplayPlugin : JavaPlugin() {
         ReplayServices.repo = repository
         val menu = ReplayMenu({ settings }, repository, play)
         server.pluginManager.registerEvents(play, this)
+        spectate = dev.etran.bedreplay.playback.SpectateListener(this, play)
+        PacketEvents.getAPI().eventManager.registerListener(spectate!!)
         server.pluginManager.registerEvents(MenuListener(), this)
 
         val cmd = ReplayCommand(this, { menu }, play)
@@ -114,6 +117,7 @@ class BedReplayPlugin : JavaPlugin() {
         // Viewers first (so nobody loses their inventory), then recordings (saved synchronously).
         playback?.shutdown()
         playerSettingsStore?.flushAll()
+        spectate?.let { runCatching { PacketEvents.getAPI().eventManager.unregisterListener(it) } }
         capture?.let { runCatching { PacketEvents.getAPI().eventManager.unregisterListener(it) } }
         recorder?.shutdown()
         dev.etran.bedreplay.record.ScoreboardRegistry.clear()

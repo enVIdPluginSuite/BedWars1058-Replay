@@ -220,6 +220,7 @@ class ReplayRoom(
                 if (counter % 10 == 0) m.hud.reassert()
                 if (counter % 20 == 0) m.ensureFlight(force = false)
                 if (m.cameraMode && counter % 20 == 0) m.keepNearFollowed()
+                if (m.cameraMode && counter % 10 == 0) renderer.showHeld(m.viewer, m.following?.let { sim[it] })
             }
             if (++counter % 4 == 0) updateProgress()
         } catch (t: Throwable) {
@@ -269,7 +270,14 @@ class ReplayRoom(
             }
             is Action.Flags -> sim[a.id]?.let { e -> e.flags = a.flags; if (render) renderer.flags(e) }
             is Action.Equip -> sim[a.id]?.let { e ->
-                if (a.slot in e.equip.indices) { e.equip[a.slot] = a.item; if (render) renderer.equip(e, a.slot) }
+                if (a.slot in e.equip.indices) {
+                    e.equip[a.slot] = a.item
+                    if (render) {
+                        renderer.equip(e, a.slot)
+                        if (a.slot == dev.etran.bedreplay.format.Slot.MAIN_HAND)
+                            for (m in members.values) if (m.cameraMode && m.following == a.id) renderer.showHeld(m.viewer, e)
+                    }
+                }
             }
             is Action.Animation -> if (render) sim[a.id]?.let { renderer.animate(it, a.anim) }
             is Action.Vitals -> sim[a.id]?.let { e -> e.health = a.health; e.maxHealth = a.maxHealth; e.food = a.food; e.level = a.level }
@@ -321,6 +329,7 @@ class ReplayRoom(
     fun playerName(rid: Int): String = players[rid]?.name ?: "player"
     fun isAlive(rid: Int) = sim.containsKey(rid)
     fun entity(rid: Int): Ent? = sim[rid]
+    fun entityByLive(liveId: Int): Ent? = sim.values.firstOrNull { it.spawned && it.liveId == liveId }
     fun attachCamera(m: PlaybackSession, e: Ent?) = renderer.camera(m.viewer, e)
 
     // ------------------------------------------------------------------ blocks

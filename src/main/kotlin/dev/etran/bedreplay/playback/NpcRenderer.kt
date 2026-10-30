@@ -48,6 +48,8 @@ import java.util.Optional
 import java.util.UUID
 import java.util.logging.Level
 
+const val CAMERA_SLOT = 7
+
 /** Mutable state of one replayed entity, shared between the timeline and the renderer. */
 class Ent(val rid: Int, val kind: String) {
     val isPlayer get() = kind == "player"
@@ -322,6 +324,16 @@ class NpcRenderer(
         toOnly(p) { send(WrapperPlayServerCamera(if (e != null && e.spawned) e.liveId else p.entityId)) }
     }
 
+    /** First-person hand: the client draws its own selected slot, so mirror the followed entity's item into hotbar slot 7. */
+    fun showHeld(p: Player, e: Ent?) {
+        try {
+            val item = peItem(e?.equip?.get(Slot.MAIN_HAND))
+            val pkt = com.github.retrooper.packetevents.wrapper.play.server.WrapperPlayServerSetSlot(0, 0, 36 + CAMERA_SLOT, item)
+            PacketEvents.getAPI().playerManager.sendPacket(p, pkt)
+        } catch (_: Throwable) {
+        }
+    }
+
     /** Everything that is not position: equipment, flags, skin layers, item stack. */
     private fun applyAppearance(e: Ent) {
         for (slot in Slot.MAIN_HAND..Slot.HELMET) if (e.equip[slot] != null) equip(e, slot)
@@ -408,7 +420,7 @@ class NpcRenderer(
         else -> EquipmentSlot.HELMET
     }
 
-    private fun peItem(s: ItemSnapshot?): PeItemStack {
+    internal fun peItem(s: ItemSnapshot?): PeItemStack {
         val bukkit = ServerCompat.toItemStack(s) ?: return PeItemStack.EMPTY
         return try {
             SpigotConversionUtil.fromBukkitItemStack(bukkit)

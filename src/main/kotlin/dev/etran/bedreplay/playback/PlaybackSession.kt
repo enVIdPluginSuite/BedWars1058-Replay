@@ -35,6 +35,7 @@ class PlaybackSession(
         private set
     var cameraMode = false
         private set
+    private var slotBeforeCamera = 0
     /** True while the viewer is typing a time into chat. */
     var awaitingTime = false
 
@@ -201,8 +202,9 @@ class PlaybackSession(
     val selfId: Int? get() = roster.firstOrNull { it.uuid.equals(viewer.uniqueId.toString(), ignoreCase = true) }?.entityId
 
     fun teleportTo(rid: Int, camera: Boolean) {
-        val name = room.players[rid]?.name ?: "player"
         val e = room.entity(rid)
+        val name = room.players[rid]?.name ?: e?.customName ?: e?.kind?.lowercase()?.replace('_', ' ') ?: "entity"
+        setCameraHand(camera)
         if (e == null) {
             // Dead or waiting to respawn: follow anyway; the camera attaches as soon as they appear.
             following = rid
@@ -215,8 +217,10 @@ class PlaybackSession(
         following = rid
         cameraMode = camera
         room.attachCamera(this, if (camera) e else null)
+        if (camera) room.renderers.showHeld(viewer, e)
         showBoard()
         viewer.sendMessage(config.msg("following", "player" to name))
+        if (camera) viewer.sendMessage(config.msg("spectate-hint"))
     }
 
     /** Teleport next to another person watching the replay. */
@@ -226,7 +230,22 @@ class PlaybackSession(
         viewer.teleport(other.viewer.location)
     }
 
+    /** In first person the viewer's selected slot must be an empty one (slot 7) so the hand shows the followed entity's item. */
+    private fun setCameraHand(on: Boolean) {
+        try {
+            if (on && !cameraMode) {
+                slotBeforeCamera = viewer.inventory.heldItemSlot
+                viewer.inventory.heldItemSlot = CAMERA_SLOT
+            } else if (!on && cameraMode) {
+                viewer.inventory.heldItemSlot = slotBeforeCamera
+                @Suppress("DEPRECATION") viewer.updateInventory()
+            }
+        } catch (_: Throwable) {
+        }
+    }
+
     fun stopFollowing() {
+        setCameraHand(false)
         if (cameraMode) room.attachCamera(this, null)
         cameraMode = false
         following = null

@@ -40,7 +40,7 @@ class PlaybackController(
     private val bridge: BedWarsBridge,
     val settings: PlayerSettingsStore,
 ) : Listener {
-    private val sessions = HashMap<UUID, PlaybackSession>()
+    private val sessions = java.util.concurrent.ConcurrentHashMap<UUID, PlaybackSession>()
     private val rooms = LinkedHashSet<ReplayRoom>()
     /** One-shot chat prompts (type a player name ...), keyed by player. */
     private val pendingInput = java.util.concurrent.ConcurrentHashMap<UUID, (String) -> Unit>()
@@ -57,6 +57,30 @@ class PlaybackController(
     private fun isActive(id: UUID) = active(id) != null
 
     fun isWatching(p: Player) = isActive(p.uniqueId)
+    fun isWatchingId(id: UUID) = isActive(id)
+
+    /** A viewer punched a replay entity (by its client-side id). With an empty hand that starts spectating it. */
+    fun punch(p: Player, liveId: Int) {
+        val s = active(p.uniqueId) ?: return
+        if (s.cameraMode) return
+        val inv = p.inventory
+        val held = inv.getItem(inv.heldItemSlot)
+        if (held != null && !held.type.name.endsWith("AIR")) return
+        val e = s.room.entityByLive(liveId) ?: return
+        s.teleportTo(e.rid, camera = true)
+    }
+
+    @EventHandler(priority = EventPriority.HIGH)
+    fun onSneak(e: org.bukkit.event.player.PlayerToggleSneakEvent) {
+        val s = active(e.player.uniqueId) ?: return
+        if (s.cameraMode && e.isSneaking) s.stopFollowing()
+    }
+
+    @EventHandler(priority = EventPriority.HIGH)
+    fun onHeld(e: org.bukkit.event.player.PlayerItemHeldEvent) {
+        val s = active(e.player.uniqueId) ?: return
+        if (s.cameraMode) e.isCancelled = true
+    }
     fun session(p: Player): PlaybackSession? = active(p.uniqueId)
     fun rooms(): List<ReplayRoom> = rooms.filter { !it.ended }
 

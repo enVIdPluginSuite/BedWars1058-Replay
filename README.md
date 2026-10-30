@@ -2,33 +2,23 @@
 
 A BedWars1058 add-on (Kotlin, Gradle) that records every match automatically and lets players watch it back in a private copy of the map, Hypixel-style, with hotbar controls to change speed, skip around and follow any player. Minecraft 1.8 up to whatever BedWars1058 itself supports (1.21.x at the time of writing).
 
-**Shared replays, spectate yourself, a one-menu hotbar, and fixes for skins, bed leftovers, entity-destroyed blocks and the in-game sidebar.**
+**Spectate anything by punching it with an empty hand, correct first-person held item, and a fix for the `Cannot interact with self!` kick.**
 
 * Group: `dev.etran` - package `dev.etran.bedreplay`
-* Version: `1.1.0`
+* Version: `1.2.0`
 * Kotlin `2.2.21`, Java 8 bytecode, Gradle (Kotlin DSL), shaded + relocated Kotlin stdlib and HikariCP
 * Required dependency: [`packetevents`](https://github.com/retrooper/packetevents) 2.x (free, actively maintained)
 * Optional: `BedWars1058` (or the `BedWars2023` fork) - without one of them there is nothing to record; `AdvancedReplay` for export
 
 ## What changed in this version
 
-**New - shared replays**
-* Other players can join a replay someone is watching: via a clickable chat message sent to the lobby, `/replaysjoin [player]`, or **Active replays** in the `/replay` menu.
-* The player who started the replay is the **host** and controls the timeline (speed, pause, skip). Guests get the replay menu and can look around freely.
-  The host role can be handed over with `/replaytransfer <player>` (or from the Sharing menu), and passes on automatically if the host leaves.
-* Sharing settings: **allow joining**, **whitelist only**, a **whitelist** (add from online players or by typing a name) and **guests may save** (default off). Every choice is remembered per player in `playerdata/<uuid>.yml` - only playback speed is deliberately not saved.
-* Guests who were not in the match can add the replay to their own list if the host allows it; saving gives access, it does not change when the replay is deleted.
-* People watching with you appear in the teleport menu, so you can teleport next to them.
-
-**New - controls**
-* **Spectate yourself** - your own player is selectable like everybody else.
-* **One menu** - the hotbar is now speed / skip controls (slots 1-6) plus a single *Replay menu* in slot 9 holding teleport to player, match events, watch yourself, sharing and leave.
+**New - spectate by punching**
+* Hold an **empty slot** (7 or 8) and punch any replayed player, mob or other entity to spectate it in first person - like spectator mode, but you stay in creative and can still fly around.
+* **Sneak** to stop spectating. Scrolling the hotbar is locked while you spectate, and the hotbar shows what the spectated player's hotbar shows.
 
 **Fixed**
-* Player **skins** are saved and shown in playback.
-* **Beds of teams that were not in the match** no longer appear (BedWars removes them at the start of the real match).
-* **Blocks destroyed by entities** (explosions, ender dragon, endermen and other entity block changes, even when BedWars cancels the event and breaks them itself) are recorded.
-* The **sidebar** now shows the in-game BedWars scoreboard instead of the lobby one: it is rebuilt from the scoreboard / team packets BedWars sends, and re-applied if another plugin overwrites it.
+* **Wrong item in hand** - in first person the client draws your own selected slot, so you saw a playback control (e.g. the slow-down item) instead of what the player was holding. While spectating, your selection moves to an empty slot that mirrors the followed player's main-hand item (updated whenever they switch).
+* **`You were kicked from bedwars: Cannot interact with self!`** - with the camera attached to someone, your own body was in the line of sight and a click on it kicked you. Clicks on yourself (and on replay entities in general) are now intercepted before the server sees them.
 
 ## Build
 
@@ -37,12 +27,12 @@ gradle build
 ```
 
 Needs Gradle 8.x and JDK 17 or newer (the plugin itself targets Java 8). The server-ready jar is
-`build/libs/BedWars1058-Replay-1.1.0.jar` (the dependency-free shadow jar, not a plain one).
+`build/libs/BedWars1058-Replay-1.2.0.jar` (the dependency-free shadow jar, not a plain one).
 
 ## Install
 
 1. Install PacketEvents and BedWars1058 on the server.
-2. Drop `BedWars1058-Replay-1.1.0.jar` into `plugins/` and **restart** (avoid hot-loading with plugin managers).
+2. Drop `BedWars1058-Replay-1.2.0.jar` into `plugins/` and **restart** (avoid hot-loading with plugin managers).
 3. Play a match - it is recorded automatically. `/replay` afterwards.
 
 ## Commands
@@ -76,6 +66,7 @@ Needs Gradle 8.x and JDK 17 or newer (the plugin itself targets Java 8). The ser
 * **Hotbar** (host) - 1 slower, 2 back 10s, 3 pause / play, 4 forward 10s, 5 faster, 6 skip to time (left-click: type it, right-click: pick a moment), 9 **Replay menu**.
   Guests only get slot 9.
 * **Replay menu** - teleport to a player (left-click = teleport, right-click = first-person view, shift-click = their inventory) or to another viewer, match events, watch yourself, stop following, sharing settings (host), save this replay (guests, if allowed), leave.
+* **Punch to spectate** - with an empty slot selected, punch any replayed entity to view through its eyes; sneak to stop.
 
 ## Configuration
 

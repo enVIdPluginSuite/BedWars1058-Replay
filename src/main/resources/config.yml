@@ -94,6 +94,7 @@ messages:
   bad-time: "&cCould not read that time."
   following: "Following &f{player}&7."
   stopped-following: "No longer following anyone."
+  spectate-hint: "&7Spectating. &fSneak&7 to stop."
   keep-on: "This replay will be kept forever."
   keep-off: "This replay will expire in &f{days}&7 days."
   extended: "Replay extended. It now expires in &f{days}&7 days."
