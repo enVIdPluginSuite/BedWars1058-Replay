@@ -2,30 +2,19 @@
 
 A BedWars1058 add-on (Kotlin, Gradle) that records every match automatically and lets players watch it back in a private copy of the map, Hypixel-style, with hotbar controls to change speed, skip around and follow any player. Minecraft 1.8 up to whatever BedWars1058 itself supports (1.21.x at the time of writing).
 
-**First complete release: automatic Hypixel-style recording of every BedWars match and a private, fully controllable playback.**
+**Bug-fix release: fixes the crash that stopped playback from starting (`Player is not allowed to fly`).**
 
 * Group: `dev.etran` - package `dev.etran.bedreplay`
-* Version: `1.0.0`
+* Version: `1.0.1`
 * Kotlin `2.2.21`, Java 8 bytecode, Gradle (Kotlin DSL), shaded + relocated Kotlin stdlib and HikariCP
 * Required dependency: [`packetevents`](https://github.com/retrooper/packetevents) 2.x (free, actively maintained)
 * Optional: `BedWars1058` (or the `BedWars2023` fork) - without one of them there is nothing to record; `AdvancedReplay` for export
 
-## What this version does
+## What changed in this version
 
-* **Automatic recording** - starts when a BedWars1058 (or BedWars2023) game starts, saves when it ends or when the server stops.
-  Recordings are flushed every few seconds, so a crash leaves a readable file instead of nothing.
-* **Records everything that matters** - player movement (invisible players too), held items and armor, animations, sneaking / sprinting / burning,
-  block changes, dropped items, arrows, TNT, fireballs, golems, silverfish, villagers and other mobs, match-wide chat **and** the chat each player actually saw,
-  sounds, titles / action bars, sidebar scoreboards, name tags (team prefixes), full player inventories and the contents of chests / ender chests / furnaces when they were opened.
-* **Private playback world** - every viewer gets a private copy of the arena built from the BedWars `Cache/<arena>.zip`; nobody sees anybody else's replay and live chat is muted.
-* **Hotbar controls** - slower, back 10s, pause / play, forward 10s, faster, skip to time (type it or pick a marker), teleport to player (left-click = teleport, right-click = first-person view),
-  match events (kills, beds, eliminations - click to jump 3s before), leave replay.
-* **Chest menu** (`/replay`) - players see their own matches, admins see all of them, no duplicates. Right-click a match to keep it forever, extend it or delete it.
-* **Spectating** - view a player's inventory and ender chest, open chests as they were at that moment, and see only the chat and sidebar that player saw.
-* **Storage** - local files by default (GZIP, delta-encoded positions), optional MySQL / MariaDB (HikariCP).
-* **Retention** - configurable default lifetime (0 = never delete), adjustable in game: keep forever / extend / delete.
-* **AdvancedReplay export** (optional) - `/replay export <id>` writes a `.replay` file AdvancedReplay can load (a subset: players, equipment, blocks, items, TNT, entities, global chat).
-* **Old files stay readable** - the on-disk format is versioned (currently format 2).
+* **Fixed:** starting a replay could fail with `IllegalArgumentException: Player is not allowed to fly (check #getAllowFlight())` and the viewer was never taken into the replay world.
+  Entering a different world can reset flight (world / game-mode plugins), so flight is now re-enabled after the teleport, once more shortly afterwards, and re-checked every second while the replay runs.
+* Nothing else changed - recording, storage and the format are identical to 1.0.0.
 
 ## Build
 
@@ -34,12 +23,12 @@ gradle build
 ```
 
 Needs Gradle 8.x and JDK 17 or newer (the plugin itself targets Java 8). The server-ready jar is
-`build/libs/BedWars1058-Replay-1.0.0.jar` (the dependency-free shadow jar, not a plain one).
+`build/libs/BedWars1058-Replay-1.0.1.jar` (the dependency-free shadow jar, not a plain one).
 
 ## Install
 
 1. Install PacketEvents and BedWars1058 on the server.
-2. Drop `BedWars1058-Replay-1.0.0.jar` into `plugins/` and **restart** (avoid hot-loading with plugin managers).
+2. Drop `BedWars1058-Replay-1.0.1.jar` into `plugins/` and **restart** (avoid hot-loading with plugin managers).
 3. Play a match - it is recorded automatically. `/replay` afterwards.
 
 ## Commands

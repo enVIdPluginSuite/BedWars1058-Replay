@@ -116,16 +116,28 @@ class PlaybackSession(
 
         val start = firstSpawn()
         viewer.teleport(start)
-        viewer.isFlying = true
+        // Changing world can reset flight (world-gamemode / multiworld plugins), so set it again afterwards.
+        ensureFlight(force = true)
         giveControls()
 
         // The client needs a moment to finish switching worlds before it can accept entity packets.
         Bukkit.getScheduler().runTaskLater(plugin, Runnable {
             if (ended || !viewer.isOnline) return@Runnable
+            ensureFlight(force = true)
             seek(0)
             task = Bukkit.getScheduler().runTaskTimer(plugin, Runnable { onTick() }, 1L, 1L)
             viewer.sendMessage(config.msg("now-playing", "map" to replay.meta.mapName))
         }, 12L)
+    }
+
+    /** Keeps the viewer able to fly around; other plugins may reset this when the world or game mode changes. */
+    private fun ensureFlight(force: Boolean) {
+        try {
+            if (viewer.gameMode != GameMode.ADVENTURE) viewer.gameMode = GameMode.ADVENTURE
+            if (!viewer.allowFlight) viewer.allowFlight = true
+            if (force && viewer.allowFlight) viewer.isFlying = true
+        } catch (_: Throwable) {
+        }
     }
 
     private fun firstSpawn(): Location {
@@ -182,6 +194,7 @@ class PlaybackSession(
                     viewer.sendMessage(config.msg("playback-ended"))
                 }
             }
+            if (counter % 20 == 0) ensureFlight(force = false)
             if (++counter % 4 == 0) updateProgress()
             if (cameraMode && counter % 20 == 0) keepNearFollowed()
         } catch (t: Throwable) {
