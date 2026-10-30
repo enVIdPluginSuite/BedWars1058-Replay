@@ -9,7 +9,7 @@ softdepend: [BedWars1058, BedWars2023, AdvancedReplay]
 commands:
   replay:
     description: Open your match replays
-    usage: /replay [stop|inv|save|reload|export <id> [world]]
+    usage: /replay [stop|inv|save|reload|record <on|off>|filter ...|export <id> [world]]
     aliases: [replays, bedreplay]
   replaysjoin:
     description: Join a replay another player is watching

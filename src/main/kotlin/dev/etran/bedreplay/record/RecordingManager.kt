@@ -45,6 +45,22 @@ class RecordingManager(
     private val byPlayer = ConcurrentHashMap<UUID, RecordingSession>()
     private val byWorld = ConcurrentHashMap<UUID, RecordingSession>()
     private var task: BukkitTask? = null
+    private var scanTask: BukkitTask? = null
+    private val seenPlaying = HashSet<ArenaRef>() // main thread only
+
+    /** Finds matches that are running without a recording (missed events, odd map groups, plugin started mid-game). */
+    private fun scan() {
+        val cfg = config()
+        if (!cfg.recordingEnabled || !cfg.autoDetect) return
+        for (arena in bridge.arenas()) {
+            if (!arena.status.equals("playing", true)) { seenPlaying.remove(arena); continue }
+            if (sessions.containsKey(arena) || arena in seenPlaying) continue
+            seenPlaying.add(arena)
+            if (arena.players.isEmpty()) continue
+            plugin.logger.info("Detected running match on ${arena.name} (group ${arena.group ?: "-"}); starting recording")
+            begin(arena)
+        }
+    }
 
     fun start() {
         spoolDir.mkdirs()
@@ -52,11 +68,13 @@ class RecordingManager(
         task = Bukkit.getScheduler().runTaskTimer(plugin, Runnable { tickAll() }, 1L, 1L)
         registerDragonEvent()
         recoverOrphans()
+        scanTask = Bukkit.getScheduler().runTaskTimer(plugin, Runnable { scan() }, 40L, 20L)
     }
 
     /** Called from onDisable: closes every live recording and saves it synchronously. */
     fun shutdown() {
         task?.cancel()
+        scanTask?.cancel()
         for (s in ArrayList(sessions.values)) finish(s, blocking = true)
     }
 
@@ -118,7 +136,11 @@ class RecordingManager(
 
     private fun begin(arena: ArenaRef) {
         if (sessions.containsKey(arena) || !arena.status.equals("playing", true)) return
-        val world = arena.world ?: Bukkit.getWorld(arena.worldName) ?: run {
+        if (!config().mayRecord(arena.name, arena.group)) {
+            plugin.logger.info("Not recording ${arena.name} (group ${arena.group ?: "-"}): excluded by recording.filter")
+            return
+        }
+        val world = arena.world ?: Bukkit.getWorld(arena.worldName) ?: arena.players.firstOrNull()?.world ?: run {
             plugin.logger.warning("Cannot record ${arena.name}: its world is not loaded")
             return
         }

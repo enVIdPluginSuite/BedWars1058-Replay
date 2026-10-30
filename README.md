@@ -2,21 +2,28 @@
 
 A BedWars1058 add-on (Kotlin, Gradle) that records every match automatically and lets players watch it back in a private copy of the map, Hypixel-style, with hotbar controls to change speed, skip around and follow any player. Minecraft 1.8 up to whatever BedWars1058 itself supports (1.21.x at the time of writing).
 
-**Asks BedWars itself to redraw the lobby scoreboard after you leave a replay.**
+**Recording now catches every running match, plus a map/group whitelist or blacklist editable in the config and in game.**
 
 * Group: `dev.etran` - package `dev.etran.bedreplay`
-* Version: `1.3.3`
+* Version: `1.4.0`
 * Kotlin `2.2.21`, Java 8 bytecode, Gradle (Kotlin DSL), shaded + relocated Kotlin stdlib and HikariCP
 * Required dependency: [`packetevents`](https://github.com/retrooper/packetevents) 2.x (free, actively maintained)
 * Optional: `BedWars1058` (or the `BedWars2023` fork) - without one of them there is nothing to record; `AdvancedReplay` for export
 
 ## What changed in this version
 
-Includes everything in 1.3.2.
+Includes everything in 1.3.3.
 
-**Fixed**
-* **Lobby scoreboard missing after leaving a replay** - when you leave a replay, the plugin now calls BedWars's own sidebar service (remove, then give) for you, 5 ticks and 2 seconds after you are back in the lobby, instead of only trying to re-point the sidebar slot. The earlier fallback copy still runs if that does not bring it back.
-* Set `debug: true` in `config.yml` to log one line per attempt (`lobby sidebar refresh for <name>: api=<true/false> snapshot=<true/false>`). If the scoreboard is still gone, send that line.
+**New**
+* **Auto-detect** (`recording.auto-detect: true`) - every second the plugin checks BedWars for matches that are in the playing state without a recording and starts one. This covers map groups whose state-change event never reached the plugin, and the plugin being loaded mid-match. It still respects `recording.enabled`.
+* **Map and group filter** (`recording.filter`) - `mode: ALL`, `WHITELIST` (only listed) or `BLACKLIST` (everything except listed). A match counts as listed if its arena name or its group is in `arenas` / `groups`. Skipped matches are logged.
+* **In-game commands** (permission `bedreplay.admin`, saved to `config.yml` and applied immediately):
+  * `/replay record <on|off>`
+  * `/replay filter` - show the current filter
+  * `/replay filter mode <all|whitelist|blacklist>`
+  * `/replay filter <arena|group> <add|remove|clear|list> [name]`
+
+Note: on very old Spigot versions saving the config from a command can drop the comments in `config.yml`.
 
 ## Build
 
@@ -26,12 +33,12 @@ Includes everything in 1.3.2.
 
 The included Gradle wrapper pins Gradle 8.14.3, which needs a JDK between 17 and 24 (the plugin itself targets Java 8).
 IntelliJ picks the wrapper up automatically. The server-ready jar is
-`build/libs/BedWars1058-Replay-1.3.3.jar` (the dependency-free shadow jar, not a plain one).
+`build/libs/BedWars1058-Replay-1.4.0.jar` (the dependency-free shadow jar, not a plain one).
 
 ## Install
 
 1. Install PacketEvents and BedWars1058 on the server.
-2. Drop `BedWars1058-Replay-1.3.3.jar` into `plugins/` and **restart** (avoid hot-loading with plugin managers).
+2. Drop `BedWars1058-Replay-1.4.0.jar` into `plugins/` and **restart** (avoid hot-loading with plugin managers).
 3. Play a match - it is recorded automatically. `/replay` afterwards.
 
 ## Commands

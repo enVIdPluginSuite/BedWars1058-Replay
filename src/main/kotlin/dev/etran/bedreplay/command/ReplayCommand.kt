@@ -32,6 +32,7 @@ class ReplayCommand(
             sender.sendMessage(plugin.settings.msg("reloaded"))
             return true
         }
+        if (sub == "filter" || sub == "record") { adminConfig(sender, sub, args); return true }
         if (sub == "export") { export(sender, args); return true }
         if (sender !is Player) { sender.sendMessage("Only players can use this command."); return true }
         if (!sender.hasPermission("bedreplay.use")) { sender.sendMessage(cfg.msg("no-permission")); return true }
@@ -97,6 +98,51 @@ class ReplayCommand(
         }
     }
 
+    private fun adminConfig(sender: CommandSender, sub: String, args: Array<out String>) {
+        if (!sender.hasPermission("bedreplay.admin")) { sender.sendMessage(plugin.settings.msg("no-permission")); return }
+        val cfg = plugin.config
+        fun say(s: String) = sender.sendMessage("§8[§bReplay§8] §7$s")
+        fun save() { plugin.saveConfig(); plugin.reloadSettings() }
+        if (sub == "record") {
+            when (args.getOrNull(1)?.lowercase()) {
+                "on", "off" -> {
+                    cfg.set("recording.enabled", args[1].equals("on", true)); save()
+                    say("Automatic recording is now ${if (args[1].equals("on", true)) "§aON" else "§cOFF"}§7.")
+                }
+                else -> say("Recording is ${if (plugin.settings.recordingEnabled) "§aON" else "§cOFF"}§7. Use /replay record <on|off>.")
+            }
+            return
+        }
+        val s = plugin.settings
+        when (args.getOrNull(1)?.lowercase()) {
+            "mode" -> {
+                val m = args.getOrNull(2)?.uppercase()
+                if (m !in setOf("ALL", "WHITELIST", "BLACKLIST")) { say("Usage: /replay filter mode <all|whitelist|blacklist>"); return }
+                cfg.set("recording.filter.mode", m); save(); say("Filter mode set to §f$m§7.")
+            }
+            "arena", "arenas", "map", "maps", "group", "groups" -> {
+                val isGroup = args[1].lowercase().startsWith("group")
+                val key = if (isGroup) "recording.filter.groups" else "recording.filter.arenas"
+                val list = cfg.getStringList(key).toMutableList()
+                val name = args.drop(3).joinToString(" ")
+                when (args.getOrNull(2)?.lowercase()) {
+                    "add" -> if (name.isEmpty()) say("Give a name.") else if (list.any { it.equals(name, true) }) say("§f$name§7 is already listed.")
+                        else { list += name; cfg.set(key, list); save(); say("Added §f$name§7. Now: §f${list.joinToString(", ")}") }
+                    "remove", "del" -> if (list.removeAll { it.equals(name, true) }) { cfg.set(key, list); save(); say("Removed §f$name§7.") } else say("§f$name§7 is not listed.")
+                    "clear" -> { cfg.set(key, emptyList<String>()); save(); say("Cleared.") }
+                    else -> say((if (isGroup) "Groups" else "Arenas") + ": §f" + (list.joinToString(", ").ifEmpty { "(none)" }))
+                }
+            }
+            else -> {
+                say("Filter mode: §f${s.filterMode}")
+                say("Arenas: §f${s.filterArenas.joinToString(", ").ifEmpty { "(none)" }}")
+                say("Groups: §f${s.filterGroups.joinToString(", ").ifEmpty { "(none)" }}")
+                say("/replay filter mode <all|whitelist|blacklist>")
+                say("/replay filter <arena|group> <add|remove|clear|list> [name]")
+            }
+        }
+    }
+
     override fun onTabComplete(sender: CommandSender, cmd: Command, alias: String, args: Array<out String>): List<String> {
         if (cmd.name.equals("replaysjoin", true) && args.size == 1) {
             return playback.rooms().map { it.host.viewer.name }.filter { it.startsWith(args[0], true) }
@@ -107,9 +153,22 @@ class ReplayCommand(
         }
         if (args.size == 1) {
             val base = mutableListOf("stop", "inv", "save")
-            if (sender.hasPermission("bedreplay.admin")) { base += "reload"; base += "export" }
+            if (sender.hasPermission("bedreplay.admin")) { base += "reload"; base += "export"; base += "filter"; base += "record" }
             return base.filter { it.startsWith(args[0], true) }
         }
+        if (sender.hasPermission("bedreplay.admin") && args[0].equals("filter", true)) {
+            val opts = when {
+                args.size == 2 -> listOf("mode", "arena", "group")
+                args.size == 3 && args[1].equals("mode", true) -> listOf("all", "whitelist", "blacklist")
+                args.size == 3 -> listOf("add", "remove", "clear", "list")
+                args.size == 4 && args[2].equals("remove", true) ->
+                    plugin.config.getStringList(if (args[1].startsWith("group", true)) "recording.filter.groups" else "recording.filter.arenas")
+                else -> emptyList()
+            }
+            return opts.filter { it.startsWith(args.last(), true) }
+        }
+        if (sender.hasPermission("bedreplay.admin") && args[0].equals("record", true) && args.size == 2)
+            return listOf("on", "off").filter { it.startsWith(args[1], true) }
         if (args.size == 2 && args[0].equals("export", true) && sender.hasPermission("bedreplay.admin")) {
             return plugin.repository.snapshot().map { it.id }.filter { it.startsWith(args[1], true) }.take(30)
         }

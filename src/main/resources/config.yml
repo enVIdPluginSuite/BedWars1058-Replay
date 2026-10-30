@@ -16,6 +16,14 @@ storage:
 
 recording:
   enabled: true
+  # Also notice matches that are already running (or whose state-change event was missed) and start recording them.
+  auto-detect: true
+  # Which maps / map groups get recorded. mode: ALL, WHITELIST (only the listed ones) or BLACKLIST (everything but the
+  # listed ones). A match is listed if its arena name OR its group is listed. Editable in game: /replay filter ...
+  filter:
+    mode: ALL
+    arenas: []
+    groups: []
   # Recordings shorter than this are thrown away (e.g. a match that was cancelled immediately).
   min-duration-seconds: 20
   # Keep recording this long after the game ends (victory screen) before saving.

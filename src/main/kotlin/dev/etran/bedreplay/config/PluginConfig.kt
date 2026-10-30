@@ -32,6 +32,23 @@ class PluginConfig(private val c: FileConfiguration) {
     )
 
     val recordingEnabled = c.getBoolean("recording.enabled", true)
+    /** Also start recording when an arena is found in the playing state without a state-change event having been seen. */
+    val autoDetect = c.getBoolean("recording.auto-detect", true)
+    val filterMode = c.getString("recording.filter.mode", "ALL")!!.uppercase().let { if (it in setOf("ALL", "WHITELIST", "BLACKLIST")) it else "ALL" }
+    val filterArenas: List<String> = c.getStringList("recording.filter.arenas")
+    val filterGroups: List<String> = c.getStringList("recording.filter.groups")
+
+    /** Whether a match on [arena] (its name) in [group] may be recorded under the map/group filter. */
+    fun mayRecord(arena: String, group: String?): Boolean {
+        val a = filterArenas.any { it.equals(arena, true) }
+        val g = group != null && filterGroups.any { it.equals(group, true) }
+        return when (filterMode) {
+            "WHITELIST" -> a || g
+            "BLACKLIST" -> !(a || g)
+            else -> true
+        }
+    }
+
     val minDurationSeconds = c.getInt("recording.min-duration-seconds", 20)
     val postGameSeconds = c.getInt("recording.post-game-seconds", 8)
     val flushIntervalSeconds = c.getInt("recording.flush-interval-seconds", 5).coerceAtLeast(1)
