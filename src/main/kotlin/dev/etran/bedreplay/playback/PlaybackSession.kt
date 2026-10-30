@@ -3,6 +3,13 @@ package dev.etran.bedreplay.playback
 import dev.etran.bedreplay.config.PluginConfig
 import dev.etran.bedreplay.format.Action
 import dev.etran.bedreplay.format.PlayerInfo
+import dev.etran.bedreplay.format.Slot
+import dev.etran.bedreplay.format.TitleKind
+import dev.etran.bedreplay.util.Visibility
+import com.github.retrooper.packetevents.PacketEvents
+import com.github.retrooper.packetevents.wrapper.play.server.WrapperPlayServerChangeGameState
+import org.bukkit.potion.PotionEffect
+import org.bukkit.potion.PotionEffectType
 import dev.etran.bedreplay.gui.Items
 import dev.etran.bedreplay.record.RecordingManager
 import dev.etran.bedreplay.storage.StoredReplay
@@ -85,6 +92,7 @@ class PlaybackSession(
             ?: Bukkit.getWorlds().first { it.uid != room.world.uid }.spawnLocation
         viewer.teleport(back)
         state.apply(viewer)
+        if (config.spectateClientMode) sendClientMode(realMode())
         ViewerState.fileFor(dir, viewer.uniqueId).delete()
     }
 
@@ -204,7 +212,7 @@ class PlaybackSession(
     fun teleportTo(rid: Int, camera: Boolean) {
         val e = room.entity(rid)
         val name = room.players[rid]?.name ?: e?.customName ?: e?.kind?.lowercase()?.replace('_', ' ') ?: "entity"
-        setCameraHand(camera)
+        setSpectating(camera)
         if (e == null) {
             // Dead or waiting to respawn: follow anyway; the camera attaches as soon as they appear.
             following = rid
@@ -217,7 +225,7 @@ class PlaybackSession(
         following = rid
         cameraMode = camera
         room.attachCamera(this, if (camera) e else null)
-        if (camera) room.renderers.showHeld(viewer, e)
+        if (camera && !config.spectateClientMode) room.renderers.showHeld(viewer, e)
         showBoard()
         viewer.sendMessage(config.msg("following", "player" to name))
         if (camera) viewer.sendMessage(config.msg("spectate-hint"))
@@ -230,22 +238,92 @@ class PlaybackSession(
         viewer.teleport(other.viewer.location)
     }
 
-    /** In first person the viewer's selected slot must be an empty one (slot 7) so the hand shows the followed entity's item. */
-    private fun setCameraHand(on: Boolean) {
+    /**
+     * First-person spectating, like spectator mode but without leaving creative-style flight:
+     * - the real body is invisible and hidden from the other viewers (it still sits next to the followed player to
+     *   keep chunks loaded, so others would otherwise see it, and see the inside of its head),
+     * - the selected slot moves to an empty one,
+     * - the client is told it is in spectator mode so no first-person hand is drawn or swung.
+     */
+    private fun setSpectating(on: Boolean) {
+        if (on == cameraMode) return
         try {
-            if (on && !cameraMode) {
+            if (on) {
                 slotBeforeCamera = viewer.inventory.heldItemSlot
                 viewer.inventory.heldItemSlot = CAMERA_SLOT
-            } else if (!on && cameraMode) {
+                hideBody(true)
+                viewer.addPotionEffect(PotionEffect(PotionEffectType.INVISIBILITY, Int.MAX_VALUE, 0, true, false), true)
+                if (config.spectateClientMode) sendClientMode(3)
+            } else {
                 viewer.inventory.heldItemSlot = slotBeforeCamera
+                hideBody(false)
+                viewer.removePotionEffect(PotionEffectType.INVISIBILITY)
+                if (config.spectateClientMode) {
+                    sendClientMode(realMode())
+                    // changing the client's game mode resets its flight abilities
+                    Bukkit.getScheduler().runTaskLater(plugin, Runnable { if (!ended && viewer.isOnline) refreshAbilities() }, 2L)
+                }
                 @Suppress("DEPRECATION") viewer.updateInventory()
             }
         } catch (_: Throwable) {
         }
     }
 
+    /** Called when the viewer leaves: undo everything [setSpectating] did. */
+    fun releaseSpectate() {
+        try {
+            if (cameraMode) setSpectating(false)
+            else if (config.spectateClientMode && viewer.isOnline) sendClientMode(realMode())
+        } catch (_: Throwable) {
+        }
+    }
+
+    private fun hideBody(hidden: Boolean) {
+        for (o in room.members.values) if (o !== this) Visibility.set(plugin, o.viewer, viewer, !hidden)
+    }
+
+    private fun realMode(): Int = when (viewer.gameMode.name) {
+        "SURVIVAL" -> 0
+        "CREATIVE" -> 1
+        "ADVENTURE" -> 2
+        else -> 3
+    }
+
+    private fun sendClientMode(mode: Int) {
+        try {
+            PacketEvents.getAPI().playerManager.sendPacket(viewer,
+                WrapperPlayServerChangeGameState(WrapperPlayServerChangeGameState.Reason.CHANGE_GAME_MODE, mode.toFloat()))
+        } catch (_: Throwable) {
+        }
+    }
+
+    private fun refreshAbilities() {
+        try {
+            viewer.allowFlight = false
+            viewer.allowFlight = true
+            viewer.isFlying = true
+        } catch (_: Throwable) {
+        }
+    }
+
+    /** Action bar while spectating in client spectator mode (no hotbar is drawn): name, health and what they hold. */
+    fun spectateInfo() {
+        if (!cameraMode || !config.spectateClientMode) return
+        val rid = following ?: return
+        val e = room.entity(rid) ?: return
+        val hp = String.format("%.1f", e.health).removeSuffix(".0")
+        hud.title(TitleKind.ACTION_BAR, "§f${room.playerName(rid)}  §c$hp❤  §7| §f${heldName(e)}", 0, 0, 0)
+    }
+
+    private fun heldName(e: Ent): String {
+        val snap = e.equip[Slot.MAIN_HAND] ?: return "Empty hand"
+        val custom = snap.displayName
+        val base = custom ?: snap.material.lowercase().replace('_', ' ').split(' ').joinToString(" ") { it.replaceFirstChar { c -> c.uppercase() } }
+        return if (snap.amount > 1) "$base x${snap.amount}" else base
+    }
+
     fun stopFollowing() {
-        setCameraHand(false)
+        setSpectating(false)
         if (cameraMode) room.attachCamera(this, null)
         cameraMode = false
         following = null

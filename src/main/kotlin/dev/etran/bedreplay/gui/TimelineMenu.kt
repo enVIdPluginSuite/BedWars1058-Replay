@@ -6,6 +6,25 @@ import dev.etran.bedreplay.record.RecordingManager
 
 /** Quick jumps: fixed percentages plus every recorded event (kills, beds, eliminations). */
 object TimelineMenu {
+    /** Splits [text] into lore lines of at most ~38 visible characters, keeping colours across lines. */
+    private fun wrap(text: String): List<String> {
+        val lines = ArrayList<String>()
+        var cur = StringBuilder("§f")
+        var visible = 0
+        for (word in text.split(' ')) {
+            val w = org.bukkit.ChatColor.stripColor(word)?.length ?: word.length
+            if (visible + w > 38 && visible > 0) {
+                lines += cur.toString().trimEnd()
+                cur = StringBuilder("§f" + org.bukkit.ChatColor.getLastColors(cur.toString()))
+                visible = 0
+            }
+            cur.append(word).append(' ')
+            visible += w + 1
+        }
+        if (visible > 0) lines += cur.toString().trimEnd()
+        return lines
+    }
+
     fun open(s: PlaybackSession) {
         val menu = Menu("§8Skip to a moment", 6)
         val pcts = listOf(0, 10, 25, 50, 75, 90)
@@ -26,7 +45,7 @@ object TimelineMenu {
                 else -> Items.PAPER
             }
             val sec = tick / 20
-            menu.set(9 + i, Items.make(icon, "§e${RecordingManager.formatTime(sec)}", listOf("§f" + m.label.take(40), "", "§7Click to jump 3s before"))) { p, _ ->
+            menu.set(9 + i, Items.make(icon, "§e${RecordingManager.formatTime(sec)}", wrap(s.room.markerLabel(m)) + listOf("", "§7Click to jump 3s before"))) { p, _ ->
                 s.seek((tick - 60).coerceAtLeast(0)); p.closeInventory()
             }
         }

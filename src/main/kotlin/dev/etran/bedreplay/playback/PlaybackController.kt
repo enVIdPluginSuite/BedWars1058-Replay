@@ -102,12 +102,13 @@ class PlaybackController(
     fun start(viewer: Player, r: StoredReplay) {
         val cfg = config()
         val id = viewer.uniqueId
-        if (isActive(id) || !starting.add(id)) return
+        if (isActive(id)) { viewer.sendMessage(cfg.msg("already-watching")); return }
+        if (!starting.add(id)) return
         if (rooms().size + starting.size - 1 >= cfg.maxConcurrentPlayback) {
             starting.remove(id); viewer.sendMessage(cfg.msg("playback-busy")); return
         }
         if (bridge.arenaOf(viewer) != null) {
-            starting.remove(id); viewer.sendMessage(cfg.msg("no-permission")); return
+            starting.remove(id); viewer.sendMessage(cfg.msg("not-in-lobby")); return
         }
         viewer.sendMessage(cfg.msg("loading"))
         repo.acquire(r.id)
@@ -146,7 +147,7 @@ class PlaybackController(
     fun join(guest: Player, room: ReplayRoom) {
         val cfg = config()
         if (isActive(guest.uniqueId)) { guest.sendMessage(cfg.msg("join-already")); return }
-        if (bridge.arenaOf(guest) != null) { guest.sendMessage(cfg.msg("join-in-game")); return }
+        if (bridge.arenaOf(guest) != null) { guest.sendMessage(cfg.msg("not-in-lobby")); return }
         if (!mayJoin(guest, room)) { guest.sendMessage(cfg.msg("join-denied")); return }
         if (!room.canAdd()) { guest.sendMessage(cfg.msg("join-full")); return }
         val s = PlaybackSession(plugin, cfg, guest, room, stateDir)
@@ -193,6 +194,39 @@ class PlaybackController(
 
     fun stop(p: Player) { active(p.uniqueId)?.stop() }
 
+    /** `/replay inv`: the inventory of the player being spectated. */
+    fun showFollowedInventory(p: Player) {
+        val s = active(p.uniqueId)
+        val rid = s?.following
+        if (s == null || rid == null) { p.sendMessage(config().msg("inv-not-spectating")); return }
+        InventoryViewMenus.openPlayer(s, rid)
+    }
+
+    /** Adds the replay [p] is watching to their own list, if the host allows it (or they are an admin). */
+    fun saveCurrent(p: Player) {
+        val cfg = config()
+        val s = active(p.uniqueId)
+        if (s == null) { p.sendMessage(cfg.msg("not-watching")); return }
+        val mine = settings.get(p.uniqueId)
+        if (s.stored.hasParticipant(p.uniqueId) || s.stored.id in mine.savedSnapshot()) { p.sendMessage(cfg.msg("save-already")); return }
+        if (!s.room.hostSettings.guestSave && !p.hasPermission("bedreplay.admin")) { p.sendMessage(cfg.msg("save-denied")); return }
+        mine.addSaved(s.stored.id)
+        settings.save(mine)
+        p.sendMessage(cfg.msg("saved"))
+    }
+
+    /** Can [p] save the replay they are watching right now? (Used to decide whether to show the button.) */
+    fun canSaveCurrent(p: Player): Boolean {
+        val s = active(p.uniqueId) ?: return false
+        val mine = settings.get(p.uniqueId)
+        return !(s.stored.hasParticipant(p.uniqueId) || s.stored.id in mine.savedSnapshot())
+    }
+
+    fun mayGuestSave(p: Player): Boolean {
+        val s = active(p.uniqueId) ?: return false
+        return s.room.hostSettings.guestSave || p.hasPermission("bedreplay.admin")
+    }
+
     fun shutdown() {
         for (r in ArrayList(rooms)) r.shutdown()
         rooms.clear()
@@ -210,6 +244,13 @@ class PlaybackController(
         val now = System.currentTimeMillis()
         if (now - (lastClick[e.player.uniqueId] ?: 0L) < 150) return
         lastClick[e.player.uniqueId] = now
+
+        // Spectating in first person: right-click shows what the followed player carries.
+        if (s.cameraMode) {
+            val rid = s.following
+            if (rid != null && (e.action == Action.RIGHT_CLICK_AIR || e.action == Action.RIGHT_CLICK_BLOCK)) InventoryViewMenus.openPlayer(s, rid)
+            return
+        }
 
         // Clicking a chest / furnace / ... that was opened during the match shows what was inside at this moment.
         val clicked = e.clickedBlock

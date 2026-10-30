@@ -49,7 +49,7 @@ class ReplayRoom(
     /** Settings of whoever hosts right now; they decide who may join and whether guests may save. */
     val hostSettings: PlayerSettings get() = settingsOf(host.viewer.uniqueId)
 
-    private val renderer = NpcRenderer(plugin, { members.values.map { it.viewer } }, players, ghostInvisible = config.showInvisibleAsGhost)
+    private val renderer = NpcRenderer(plugin, { members.values.map { it.viewer } }, players, healthMode = config.healthDisplay)
     internal val renderers get() = renderer
 
     // shared state rebuilt on every seek
@@ -124,6 +124,8 @@ class ReplayRoom(
 
     /** Brings a guest into the room, next to the host. */
     fun join(guest: PlaybackSession) {
+        // People already spectating are invisible to everyone else, newcomers included.
+        for (m in members.values) if (m.cameraMode) dev.etran.bedreplay.util.Visibility.set(plugin, guest.viewer, m.viewer, false)
         members[guest.viewer.uniqueId] = guest
         val at = host.viewer.location.clone().also { it.world = world }
         guest.enter(at)
@@ -141,6 +143,7 @@ class ReplayRoom(
     /** A member leaves (or is removed). The room closes when the last one goes; a host who leaves hands over. */
     fun leave(m: PlaybackSession, restore: Boolean) {
         if (m.ended) return
+        m.releaseSpectate()
         m.ended = true
         members.remove(m.viewer.uniqueId)
         try {
@@ -220,7 +223,9 @@ class ReplayRoom(
                 if (counter % 10 == 0) m.hud.reassert()
                 if (counter % 20 == 0) m.ensureFlight(force = false)
                 if (m.cameraMode && counter % 20 == 0) m.keepNearFollowed()
-                if (m.cameraMode && counter % 10 == 0) renderer.showHeld(m.viewer, m.following?.let { sim[it] })
+                if (m.cameraMode && counter % 10 == 0) {
+                    if (config.spectateClientMode) m.spectateInfo() else renderer.showHeld(m.viewer, m.following?.let { sim[it] })
+                }
             }
             if (++counter % 4 == 0) updateProgress()
         } catch (t: Throwable) {
@@ -274,13 +279,17 @@ class ReplayRoom(
                     e.equip[a.slot] = a.item
                     if (render) {
                         renderer.equip(e, a.slot)
-                        if (a.slot == dev.etran.bedreplay.format.Slot.MAIN_HAND)
+                        if (a.slot == dev.etran.bedreplay.format.Slot.MAIN_HAND && !config.spectateClientMode)
                             for (m in members.values) if (m.cameraMode && m.following == a.id) renderer.showHeld(m.viewer, e)
                     }
                 }
             }
             is Action.Animation -> if (render) sim[a.id]?.let { renderer.animate(it, a.anim) }
-            is Action.Vitals -> sim[a.id]?.let { e -> e.health = a.health; e.maxHealth = a.maxHealth; e.food = a.food; e.level = a.level }
+            is Action.Vitals -> sim[a.id]?.let { e ->
+                val changed = Math.ceil(e.health.toDouble()) != Math.ceil(a.health.toDouble()) || e.maxHealth != a.maxHealth
+                e.health = a.health; e.maxHealth = a.maxHealth; e.food = a.food; e.level = a.level
+                if (render && changed) renderer.health(e)
+            }
             is Action.Hotbar -> sim[a.id]?.let { e -> e.heldSlot = a.heldSlot; e.hotbar = a.items }
             is Action.BlockChange -> if (blocks) applyBlock(a)
             is Action.Chat -> if (events) for (m in members.values) m.deliverChat(a)
@@ -327,6 +336,17 @@ class ReplayRoom(
     fun inventoryOf(rid: Int): Action.Inventory? = inventories[rid]
     fun enderChestOf(rid: Int): Action.Container? = containers[containerKey(0, 0, 0, rid)]
     fun playerName(rid: Int): String = players[rid]?.name ?: "player"
+
+    /** A timeline label with BedWars placeholders ({PlayerColor}{PlayerName} ...) filled in, also for older recordings. */
+    fun markerLabel(m: Action.Marker): String {
+        val subject = players[m.subjectId]
+        val color = subject?.let { dev.etran.bedreplay.util.ChatPalette.code(it.teamColor) } ?: ""
+        var t = m.label
+            .replace("{PlayerColor}", color).replace("{PlayerName}", (subject?.name ?: "A player") + "§f")
+            .replace("{TeamColor}", color).replace("{KillerColor}", "").replace("{KillerName}", "a player")
+        t = t.replace(Regex("\\{[A-Za-z]+\\}"), "")
+        return t.trim()
+    }
     fun isAlive(rid: Int) = sim.containsKey(rid)
     fun entity(rid: Int): Ent? = sim[rid]
     fun entityByLive(liveId: Int): Ent? = sim.values.firstOrNull { it.spawned && it.liveId == liveId }

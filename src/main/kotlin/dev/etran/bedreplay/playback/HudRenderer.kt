@@ -16,23 +16,28 @@ import org.bukkit.Bukkit
 import org.bukkit.ChatColor
 import org.bukkit.entity.Player
 import org.bukkit.plugin.Plugin
-import org.bukkit.scoreboard.DisplaySlot
-import org.bukkit.scoreboard.Objective
-import org.bukkit.scoreboard.Scoreboard
+import com.github.retrooper.packetevents.wrapper.play.server.WrapperPlayServerDisplayScoreboard
+import com.github.retrooper.packetevents.wrapper.play.server.WrapperPlayServerScoreboardObjective
+import com.github.retrooper.packetevents.wrapper.play.server.WrapperPlayServerTeams
+import com.github.retrooper.packetevents.wrapper.play.server.WrapperPlayServerUpdateScore
+import dev.etran.bedreplay.record.ScoreboardRegistry
+import java.util.Optional
 import java.util.logging.Level
 
 /**
- * Screen furniture for one viewer: titles / action bar (as packets, so it works on every version) and the
- * sidebar scoreboard (a private Bukkit scoreboard that is swapped in and out).
+ * Screen furniture for one viewer: titles / action bar and the sidebar scoreboard, all as packets.
+ *
+ * The sidebar is a client-side objective of our own that takes over the sidebar slot. The viewer's real scoreboard
+ * (the lobby sidebar BedWars draws with packets) is never touched, so it can simply be put back when the replay ends.
  */
 class HudRenderer(private val plugin: Plugin, private val viewer: Player) {
     private val pm = PacketEvents.getAPI().playerManager
     private val modernTitles = PacketEvents.getAPI().serverManager.version.isNewerThanOrEquals(ServerVersion.V_1_17)
-    private val original: Scoreboard? = viewer.scoreboard
-    private var board: Scoreboard? = null
-    private var objective: Objective? = null
+    private var created = false
     private var shownLines = 0
     private var lastSignature: String? = null
+    private var lastTitle: String? = null
+    private val lineSigs = ArrayList<String>()
     private var warned = false
 
     private fun send(w: PacketWrapper<*>) {
@@ -74,6 +79,13 @@ class HudRenderer(private val plugin: Plugin, private val viewer: Player) {
 
     // ------------------------------------------------------------------ sidebar
 
+    private companion object {
+        const val OBJ = "brhud"
+        const val SIDEBAR_SLOT = 1
+    }
+
+    private fun objectiveTitle(title: String) = AdventureSerializer.fromLegacyFormat(clip(title, if (ServerCompat.atLeast(1, 13)) 128 else 32))
+
     /** Shows [title]/[lines] as the viewer's sidebar; a null title removes it. Cheap when nothing changed. */
     fun sidebar(title: String?, lines: List<String>) {
         val sig = title + "\u0000" + lines.joinToString("\u0001")
@@ -81,66 +93,69 @@ class HudRenderer(private val plugin: Plugin, private val viewer: Player) {
         lastSignature = sig
         try {
             if (title == null) { hideSidebar(); return }
-            val sb = board ?: Bukkit.getScoreboardManager().newScoreboard.also { board = it }
-            var obj = objective
-            if (obj == null) {
-                obj = newObjective(sb)
-                obj.displaySlot = DisplaySlot.SIDEBAR
-                objective = obj
+            if (!created) {
+                send(WrapperPlayServerScoreboardObjective(OBJ, WrapperPlayServerScoreboardObjective.ObjectiveMode.CREATE, objectiveTitle(title), WrapperPlayServerScoreboardObjective.RenderType.INTEGER))
+                send(WrapperPlayServerDisplayScoreboard(SIDEBAR_SLOT, OBJ))
+                created = true
+                lastTitle = title
+            } else if (title != lastTitle) {
+                send(WrapperPlayServerScoreboardObjective(OBJ, WrapperPlayServerScoreboardObjective.ObjectiveMode.UPDATE, objectiveTitle(title), WrapperPlayServerScoreboardObjective.RenderType.INTEGER))
+                lastTitle = title
             }
-            obj.displayName = clip(title, if (ServerCompat.atLeast(1, 13)) 128 else 32)
             val maxPart = if (ServerCompat.atLeast(1, 13)) 64 else 16
-
-            for (i in lines.indices) {
+            val shown = lines.take(15)
+            for (i in shown.indices) {
                 val entry = entryFor(i)
-                val team = sb.getTeam("l$i") ?: sb.registerNewTeam("l$i").also { it.addEntry(entry) }
-                val (prefix, suffix) = split(lines[i], maxPart)
-                team.prefix = prefix
-                team.suffix = suffix
-                obj.getScore(entry).score = lines.size - i
+                val (prefix, suffix) = split(shown[i], maxPart)
+                val lineSig = "$prefix|$suffix"
+                val existed = i < shownLines
+                if (!existed || lineSigs.getOrNull(i) != lineSig) {
+                    val info = WrapperPlayServerTeams.ScoreBoardTeamInfo(
+                        net.kyori.adventure.text.Component.text(OBJ + i),
+                        AdventureSerializer.fromLegacyFormat(prefix),
+                        AdventureSerializer.fromLegacyFormat(suffix),
+                        WrapperPlayServerTeams.NameTagVisibility.NEVER,
+                        WrapperPlayServerTeams.CollisionRule.NEVER,
+                        net.kyori.adventure.text.format.NamedTextColor.WHITE,
+                        WrapperPlayServerTeams.OptionData.NONE,
+                    )
+                    send(WrapperPlayServerTeams(OBJ + i, if (existed) WrapperPlayServerTeams.TeamMode.UPDATE else WrapperPlayServerTeams.TeamMode.CREATE, info, listOf(entry)))
+                    if (i < lineSigs.size) lineSigs[i] = lineSig else lineSigs.add(lineSig)
+                }
+                send(WrapperPlayServerUpdateScore(entry, WrapperPlayServerUpdateScore.Action.CREATE_OR_UPDATE_ITEM, OBJ, Optional.of(shown.size - i)))
             }
-            for (i in lines.size until shownLines) {
-                val entry = entryFor(i)
-                sb.resetScores(entry)
-                sb.getTeam("l$i")?.unregister()
-            }
-            shownLines = lines.size
-            if (viewer.scoreboard !== sb) viewer.scoreboard = sb
+            for (i in shown.size until shownLines) removeLine(i)
+            while (lineSigs.size > shown.size) lineSigs.removeAt(lineSigs.size - 1)
+            shownLines = shown.size
         } catch (t: Throwable) {
             if (!warned) { warned = true; plugin.logger.log(Level.WARNING, "Could not draw the replay scoreboard", t) }
         }
     }
 
+    private fun removeLine(i: Int) {
+        send(WrapperPlayServerUpdateScore(entryFor(i), WrapperPlayServerUpdateScore.Action.REMOVE_ITEM, OBJ, Optional.empty()))
+        send(WrapperPlayServerTeams(OBJ + i, WrapperPlayServerTeams.TeamMode.REMOVE, null as WrapperPlayServerTeams.ScoreBoardTeamInfo?))
+    }
+
     /**
-     * Lobby scoreboard / tab plugins re-assign a player's scoreboard when they change world, and again whenever they
-     * refresh. Take it back if that happened, so the replay sidebar stays on screen.
+     * Lobby scoreboard / tab plugins can put their own objective into the sidebar slot again (for instance when the
+     * viewer changes world). Take the slot back so the replay sidebar stays on screen.
      */
     fun reassert() {
-        val sb = board ?: return
-        try {
-            if (viewer.scoreboard !== sb) viewer.scoreboard = sb
-        } catch (_: Throwable) {
-        }
+        if (!created) return
+        send(WrapperPlayServerDisplayScoreboard(SIDEBAR_SLOT, OBJ))
     }
 
     private fun hideSidebar() {
-        objective?.unregister()
-        objective = null
-        board?.let { sb -> for (i in 0 until shownLines) { sb.getTeam("l$i")?.unregister() } }
-        shownLines = 0
-        board?.let { if (viewer.scoreboard === it) viewer.scoreboard = original ?: Bukkit.getScoreboardManager().mainScoreboard }
-        board = null
-    }
-
-    @Suppress("DEPRECATION")
-    private fun newObjective(sb: Scoreboard): Objective =
-        try {
-            sb.registerNewObjective("replay", "dummy")
-        } catch (_: Throwable) {
-            // 1.13+ also takes a display name; the two-argument form is deprecated and may disappear.
-            val m = Scoreboard::class.java.getMethod("registerNewObjective", String::class.java, String::class.java, String::class.java)
-            m.invoke(sb, "replay", "dummy", "Replay") as Objective
+        if (created) {
+            for (i in 0 until shownLines) removeLine(i)
+            send(WrapperPlayServerScoreboardObjective(OBJ, WrapperPlayServerScoreboardObjective.ObjectiveMode.REMOVE, net.kyori.adventure.text.Component.empty(), WrapperPlayServerScoreboardObjective.RenderType.INTEGER))
         }
+        created = false
+        shownLines = 0
+        lastTitle = null
+        lineSigs.clear()
+    }
 
     /** A unique invisible score entry per line: a colour code pair that never renders. */
     private fun entryFor(i: Int): String {
@@ -160,12 +175,19 @@ class HudRenderer(private val plugin: Plugin, private val viewer: Player) {
         return prefix to clip(rest, max)
     }
 
-    /** Puts the viewer's own scoreboard back. */
+    /**
+     * Ends the HUD and hands the sidebar slot back to whatever the player had before the replay (the BedWars lobby
+     * sidebar is drawn with packets the server does not know about, so it has to be pointed at again explicitly).
+     */
     fun close() {
         try {
             clearTitles()
+            val had = created
             hideSidebar()
-            if (viewer.isOnline) viewer.scoreboard = original ?: Bukkit.getScoreboardManager().mainScoreboard
+            if (viewer.isOnline && had) {
+                val original = ScoreboardRegistry.peek(viewer.uniqueId)?.sidebarObjective()
+                if (original != null) send(WrapperPlayServerDisplayScoreboard(SIDEBAR_SLOT, original))
+            }
         } catch (_: Throwable) {
         }
     }

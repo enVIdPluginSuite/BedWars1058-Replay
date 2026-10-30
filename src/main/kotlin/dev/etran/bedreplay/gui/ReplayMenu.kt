@@ -43,6 +43,14 @@ class ReplayMenu(
             menu.set(47, Items.make(Items.BEACON, if (showAll) "§cShowing: all matches" else "§aShowing: my matches",
                 listOf("§7Click to switch"))) { w, _ -> open(w, 0, !showAll) }
         }
+        val ctl = ReplayServices.controller
+        if (ctl.isWatching(p) && ctl.canSaveCurrent(p)) {
+            if (ctl.mayGuestSave(p)) {
+                menu.set(48, Items.make(Items.EMERALD, "§aSave the replay you are watching", listOf("§7Adds it to this list so you can", "§7watch it again later"))) { w, _ -> ctl.saveCurrent(w); open(w, pg, showAll) }
+            } else {
+                menu.set(48, Items.make(Items.LAVA, "§7Saving not allowed", listOf("§7The host has not allowed guests to save")))
+            }
+        }
         menu.set(50, Items.make(Items.BOOK, "§bSharing settings", listOf("§7Who may join your replays,", "§7your whitelist, guest saving"))) { w, _ -> SharingMenu.open(w, null) }
         val joinable = ReplayServices.controller.rooms().count { ReplayServices.controller.mayJoin(p, it) }
         menu.set(51, Items.make(Items.BEACON, "§aActive replays §7($joinable)", listOf("§7Join a replay someone else", "§7is watching right now"))) { w, _ -> ActiveReplaysMenu.open(w) }

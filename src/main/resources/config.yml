@@ -55,9 +55,12 @@ playback:
   default-speed: 1.0
   skip-seconds: 10
   play-sounds: true
-  # Invisible players are always recorded. true = drawn as a faint "(invisible)" player so you can
-  # still follow them; false = drawn invisible like in the match.
-  show-invisible-players: true
+  # Invisible players are drawn invisible like in the match, but keep their armor and name tag so you can find them.
+  # Health above players' heads: OFF, NUMBER (a number + heart under the name), HEARTS (a row of hearts after the name) or BOTH.
+  health-display: BOTH
+  # While spectating a player, tell the client it is in spectator mode: no first-person hand is drawn or swung,
+  # so nothing can look misaligned. Their name, health and held item show in the action bar instead.
+  spectate-client-mode: true
   # Where viewers are sent when playback ends. Empty = the world they started from.
   return-world: ""
 
@@ -94,7 +97,7 @@ messages:
   bad-time: "&cCould not read that time."
   following: "Following &f{player}&7."
   stopped-following: "No longer following anyone."
-  spectate-hint: "&7Spectating. &fSneak&7 to stop."
+  spectate-hint: "&7Spectating. &fSneak&7 to stop, &f/replay inv&7 to see their inventory."
   keep-on: "This replay will be kept forever."
   keep-off: "This replay will expire in &f{days}&7 days."
   extended: "Replay extended. It now expires in &f{days}&7 days."
@@ -115,7 +118,10 @@ messages:
   join-full: "&cThat replay is full."
   join-not-found: "&cNobody by that name is hosting a replay."
   join-already: "&cYou are already watching a replay."
-  join-in-game: "&cYou cannot join a replay while you are in a match."
+  join-in-game: "&eYou must be in the main BedWars lobby to join a replay."
+  not-in-lobby: "&eYou must be in the main BedWars lobby to watch a replay."
+  already-watching: "&eYou are already watching a replay. Leave it first with &f/replay stop&e."
+  inv-not-spectating: "&cYou are not spectating anyone. Punch a player with an empty hand first."
   host-only: "&cOnly the host of this replay can do that."
   announce: "&f{host}&7 is watching a replay of &f{map}&7. &a[Click to join]"
   announce-hover: "Join {host}'s replay"

@@ -4,3 +4,5 @@
 gradle.properties
 gradlew
 gradlew.bat
+build
+.kotlin

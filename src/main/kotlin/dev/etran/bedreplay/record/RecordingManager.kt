@@ -88,9 +88,20 @@ class RecordingManager(
     override fun onKill(arena: ArenaRef, victim: Player, killer: Player?, finalKill: Boolean, message: String?) {
         val s = sessions[arena] ?: return
         s.death(victim.uniqueId)
-        val label = message?.let { ChatColor.stripColor(it) }
+        val label = message?.let { resolvePlaceholders(it, arena, victim, killer) }
             ?: if (killer != null) "${killer.name} killed ${victim.name}" else "${victim.name} died"
         s.marker(if (finalKill) MarkerKind.FINAL_KILL else MarkerKind.KILL, label, victim.uniqueId)
+    }
+
+    /** BedWars messages carry placeholders such as {PlayerColor}{PlayerName}; fill them in while the players are known. */
+    private fun resolvePlaceholders(message: String, arena: ArenaRef, victim: Player, killer: Player?): String {
+        fun color(p: Player?): String = p?.let { arena.teamOf(it)?.rgb }?.let { dev.etran.bedreplay.util.ChatPalette.code(it) } ?: ""
+        var t = ChatColor.translateAlternateColorCodes('&', message)
+            .replace("{PlayerColor}", color(victim)).replace("{PlayerName}", victim.name + "§f")
+            .replace("{TeamColor}", color(victim))
+            .replace("{KillerColor}", color(killer)).replace("{KillerName}", (killer?.name ?: "") + "§f")
+        t = t.replace(Regex("\\{[A-Za-z]+\\}"), "")
+        return t.trim()
     }
 
     override fun onBedBreak(arena: ArenaRef, breaker: Player, victimTeam: String) {

@@ -59,7 +59,10 @@ class PluginConfig(private val c: FileConfiguration) {
     val defaultSpeed = c.getDouble("playback.default-speed", 1.0)
     val skipSeconds = c.getInt("playback.skip-seconds", 10).coerceAtLeast(1)
     val playSounds = c.getBoolean("playback.play-sounds", true)
-    val showInvisibleAsGhost = c.getBoolean("playback.show-invisible-players", true)
+    /** OFF, NUMBER (below the name), HEARTS (a heart row after the name) or BOTH. */
+    val healthDisplay = (c.getString("playback.health-display", "BOTH") ?: "BOTH").uppercase().let { if (it in setOf("OFF", "NUMBER", "HEARTS", "BOTH")) it else "BOTH" }
+    /** While spectating, tell the client it is in spectator mode so no hand / item is drawn or swung. */
+    val spectateClientMode = c.getBoolean("playback.spectate-client-mode", true)
     val sharingDefaultAllowJoin = c.getBoolean("sharing.default-allow-join", false)
     val sharingDefaultWhitelistOnly = c.getBoolean("sharing.default-whitelist-only", false)
     val sharingDefaultGuestSave = c.getBoolean("sharing.default-guest-save", false)

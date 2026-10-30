@@ -92,8 +92,8 @@ class NpcRenderer(
     private val targets: () -> Collection<Player>,
     private val players: Map<Int, PlayerInfo>,
     private val skinLayers: Boolean = true,
-    /** Draw invisible players as faint "(invisible)" players instead of not at all. */
-    private val ghostInvisible: Boolean = true,
+    /** OFF, NUMBER, HEARTS or BOTH: how player health is shown above the head. */
+    private val healthMode: String = "BOTH",
 ) {
     private val pm = PacketEvents.getAPI().playerManager
     private val sv: ServerVersion = PacketEvents.getAPI().serverManager.version
@@ -130,6 +130,7 @@ class NpcRenderer(
     /** Removes everything from one viewer's client (they are leaving, the others keep watching). */
     fun despawnFor(p: Player, ents: Collection<Ent>) {
         toOnly(p) { for (e in ents) if (e.spawned) destroyPackets(e) }
+        removeHealthObjective(p)
     }
 
     // ------------------------------------------------------------------ spawn / despawn
@@ -146,7 +147,7 @@ class NpcRenderer(
         if (e.isPlayer) spawnPlayer(e) else spawnOther(e) ?: return
         e.spawned = true
         applyAppearance(e)
-        if (e.isPlayer) nametag(e)
+        if (e.isPlayer) { nametag(e); healthScore(e) }
     }
 
     private fun spawnPlayer(e: Ent) {
@@ -244,7 +245,7 @@ class NpcRenderer(
         if (e.flags and Flag.BURNING != 0) bits = bits or 0x01
         if (e.flags and Flag.SNEAKING != 0) bits = bits or 0x02
         if (e.flags and Flag.SPRINTING != 0) bits = bits or 0x08
-        if (e.flags and Flag.INVISIBLE != 0 && !ghostInvisible) bits = bits or 0x20
+        if (e.flags and Flag.INVISIBLE != 0) bits = bits or 0x20
         if (e.flags and Flag.GLIDING != 0) bits = bits or 0x80
         val data = ArrayList<EntityData<*>>(2)
         data += EntityData(0, EntityDataTypes.BYTE, bits.toByte())
@@ -254,7 +255,7 @@ class NpcRenderer(
             data += EntityData(6, EntityDataTypes.ENTITY_POSE, pose)
         }
         send(WrapperPlayServerEntityMetadata(e.liveId, data))
-        if (e.isPlayer && ghostInvisible) nametag(e) // the "(invisible)" marker may have changed
+        if (e.isPlayer) nametag(e) // an invisible player keeps their name tag even if the match hid it
     }
 
     // ------------------------------------------------------------------ name tags
@@ -272,14 +273,20 @@ class NpcRenderer(
         var prefix = e.prefix
         if (prefix.isBlank() && info != null && info.teamColor >= 0) prefix = "§" + nearestColorCode(info.teamColor)
         var suffix = e.suffix
-        if (ghostInvisible && e.flags and Flag.INVISIBLE != 0) suffix += " §7(invisible)"
-        val sig = "$prefix|$suffix|${e.tagHidden}"
+        if (heartRow()) {
+            val row = heartRow(e)
+            // 1.8 - 1.12 limit a team suffix to 16 characters
+            if (!(sv.isOlderThan(ServerVersion.V_1_13) && suffix.length + row.length > 16)) suffix += row
+        }
+        // Invisible players are only findable by their tag, so it stays even if the match hid it.
+        val hidden = e.tagHidden && e.flags and Flag.INVISIBLE == 0
+        val sig = "$prefix|$suffix|$hidden"
         // A viewer who just joined has no team yet, so it must be created for them even if others already have it.
         val first = e.tagSent == null || only != null
         if (sig == e.tagSent && only == null) return
         e.tagSent = sig
 
-        val visibility = if (e.tagHidden) WrapperPlayServerTeams.NameTagVisibility.NEVER else WrapperPlayServerTeams.NameTagVisibility.ALWAYS
+        val visibility = if (hidden) WrapperPlayServerTeams.NameTagVisibility.NEVER else WrapperPlayServerTeams.NameTagVisibility.ALWAYS
         val teamInfo = WrapperPlayServerTeams.ScoreBoardTeamInfo(
             net.kyori.adventure.text.Component.text(teamName(e)),
             AdventureSerializer.fromLegacyFormat(prefix),
@@ -291,6 +298,73 @@ class NpcRenderer(
         )
         val mode = if (first) WrapperPlayServerTeams.TeamMode.CREATE else WrapperPlayServerTeams.TeamMode.UPDATE
         send(WrapperPlayServerTeams(teamName(e), mode, teamInfo, listOf(name)))
+    }
+
+    // ------------------------------------------------------------------ health
+
+    private val objectiveReady = HashSet<UUID>()
+
+    private fun belowName() = healthMode == "NUMBER" || healthMode == "BOTH"
+    private fun heartRow() = healthMode == "HEARTS" || healthMode == "BOTH"
+
+    /** " ❤❤❤❤❤❤❤❤❤❤": one heart per 10% of max health, red for what is left and dark gray for what is missing. */
+    private fun heartRow(e: Ent): String {
+        val max = if (e.maxHealth > 0f) e.maxHealth else 20f
+        val full = Math.ceil((e.health.coerceIn(0f, max) / max * 10f).toDouble()).toInt().coerceIn(0, 10)
+        return " §c" + "❤".repeat(full) + (if (full < 10) "§8" + "❤".repeat(10 - full) else "")
+    }
+
+    private fun healthObjectiveName() = "brhp"
+
+    private fun ensureHealthObjective() {
+        if (!belowName()) return
+        val list = only?.let { listOf(it) } ?: targets()
+        for (p in list) {
+            if (!objectiveReady.add(p.uniqueId)) continue
+            try {
+                pm.sendPacket(p, com.github.retrooper.packetevents.wrapper.play.server.WrapperPlayServerScoreboardObjective(
+                    healthObjectiveName(),
+                    com.github.retrooper.packetevents.wrapper.play.server.WrapperPlayServerScoreboardObjective.ObjectiveMode.CREATE,
+                    AdventureSerializer.fromLegacyFormat("§c❤"),
+                    com.github.retrooper.packetevents.wrapper.play.server.WrapperPlayServerScoreboardObjective.RenderType.INTEGER,
+                ))
+                pm.sendPacket(p, com.github.retrooper.packetevents.wrapper.play.server.WrapperPlayServerDisplayScoreboard(2, healthObjectiveName()))
+            } catch (_: Throwable) {
+            }
+        }
+    }
+
+    /** Removes the health objective from one viewer's client. */
+    fun removeHealthObjective(p: Player) {
+        if (!objectiveReady.remove(p.uniqueId)) return
+        try {
+            pm.sendPacket(p, com.github.retrooper.packetevents.wrapper.play.server.WrapperPlayServerScoreboardObjective(
+                healthObjectiveName(),
+                com.github.retrooper.packetevents.wrapper.play.server.WrapperPlayServerScoreboardObjective.ObjectiveMode.REMOVE,
+                AdventureSerializer.fromLegacyFormat("§c❤"),
+                com.github.retrooper.packetevents.wrapper.play.server.WrapperPlayServerScoreboardObjective.RenderType.INTEGER,
+            ))
+        } catch (_: Throwable) {
+        }
+    }
+
+    /** The number under the name (health + a red heart); a score is looked up by the player's name. */
+    private fun healthScore(e: Ent) {
+        if (!belowName() || !e.spawned || !e.isPlayer) return
+        ensureHealthObjective()
+        val name = (players[e.rid]?.name ?: "Player").take(16)
+        val value = Math.ceil(e.health.toDouble()).toInt().coerceAtLeast(0)
+        send(com.github.retrooper.packetevents.wrapper.play.server.WrapperPlayServerUpdateScore(
+            name, com.github.retrooper.packetevents.wrapper.play.server.WrapperPlayServerUpdateScore.Action.CREATE_OR_UPDATE_ITEM,
+            healthObjectiveName(), Optional.of(value),
+        ))
+    }
+
+    /** Health changed: update the number under the name and the heart row after it. */
+    fun health(e: Ent) {
+        if (!e.spawned || !e.isPlayer || healthMode == "OFF") return
+        healthScore(e)
+        nametag(e)
     }
 
     private fun nearestColorCode(rgb: Int): Char {

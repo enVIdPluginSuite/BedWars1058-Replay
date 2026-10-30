@@ -34,15 +34,14 @@ object ControlMenu {
             menu.set(11, Items.head(s.room.host.viewer.name, "§bHost: §f${s.room.host.viewer.name}", listOf(
                 "§7Only the host controls playback.", "§f${s.room.members.size}§7 watching",
             )))
-            val settings = svc.settings.get(s.viewer.uniqueId)
-            val alreadyHas = s.stored.hasParticipant(s.viewer.uniqueId) || s.stored.id in settings.savedSnapshot()
-            if (s.room.hostSettings.guestSave && !alreadyHas) {
-                menu.set(13, Items.make(Items.EMERALD, "§aSave this replay", listOf("§7Add it to your own /replay list"))) { p, _ ->
-                    settings.addSaved(s.stored.id); svc.settings.save(settings)
-                    p.sendMessage(s.config.msg("saved")); open(s)
+            if (svc.controller.canSaveCurrent(s.viewer)) {
+                if (svc.controller.mayGuestSave(s.viewer)) {
+                    menu.set(13, Items.make(Items.EMERALD, "§aSave this replay", listOf("§7Add it to your own /replay list"))) { p, _ ->
+                        svc.controller.saveCurrent(p); open(s)
+                    }
+                } else {
+                    menu.set(13, Items.make(Items.LAVA, "§7Saving not allowed", listOf("§7The host has not allowed guests to save")))
                 }
-            } else if (!alreadyHas) {
-                menu.set(13, Items.make(Items.LAVA, "§7Saving not allowed", listOf("§7The host has not allowed guests to save")))
             }
         }
         menu.set(16, Items.make(Items.EXIT, "§cLeave replay", listOf("§7Return to where you were"))) { p, _ ->

@@ -2,37 +2,37 @@
 
 A BedWars1058 add-on (Kotlin, Gradle) that records every match automatically and lets players watch it back in a private copy of the map, Hypixel-style, with hotbar controls to change speed, skip around and follow any player. Minecraft 1.8 up to whatever BedWars1058 itself supports (1.21.x at the time of writing).
 
-**Spectate anything by punching it with an empty hand, correct first-person held item, and a fix for the `Cannot interact with self!` kick.**
+**Invisible players keep their name and health on screen, and spectating shows the held item again with a locked look so the hand cannot sway.**
 
 * Group: `dev.etran` - package `dev.etran.bedreplay`
-* Version: `1.2.0`
+* Version: `1.3.1`
 * Kotlin `2.2.21`, Java 8 bytecode, Gradle (Kotlin DSL), shaded + relocated Kotlin stdlib and HikariCP
 * Required dependency: [`packetevents`](https://github.com/retrooper/packetevents) 2.x (free, actively maintained)
 * Optional: `BedWars1058` (or the `BedWars2023` fork) - without one of them there is nothing to record; `AdvancedReplay` for export
 
 ## What changed in this version
 
-**New - spectate by punching**
-* Hold an **empty slot** (7 or 8) and punch any replayed player, mob or other entity to spectate it in first person - like spectator mode, but you stay in creative and can still fly around.
-* **Sneak** to stop spectating. Scrolling the hotbar is locked while you spectate, and the hotbar shows what the spectated player's hotbar shows.
+Includes everything in 1.3.0.
 
 **Fixed**
-* **Wrong item in hand** - in first person the client draws your own selected slot, so you saw a playback control (e.g. the slow-down item) instead of what the player was holding. While spectating, your selection moves to an empty slot that mirrors the followed player's main-hand item (updated whenever they switch).
-* **`You were kicked from bedwars: Cannot interact with self!`** - with the camera attached to someone, your own body was in the line of sight and a click on it kicked you. Clicks on yourself (and on replay entities in general) are now intercepted before the server sees them.
+* **Invisible players now show their name tag and health** - modern clients hide the name tag of an invisible player even when the team says "always show", so the name (with team color and heart row) and the health number now float above an invisible player on invisible armor stands. The body stays invisible, the armor stays visible, and punching the floating text still spectates that player.
+* **Spectating shows the held item again** - the client is no longer switched to spectator mode by default, so your hand shows what the followed player holds. To stop the hand from moving on its own, your look is locked to the followed player's every tick: the hand only sways when *they* look around. Your own body stays invisible and hidden from other viewers, as in 1.3.0.
+* `playback.spectate-client-mode` is now **opt-in** (`false` by default). Turn it on for real client spectator mode: no hand or hotbar at all, with name, health and held item in the action bar.
 
 ## Build
 
 ```
-gradle build
+./gradlew build        (Windows: gradlew.bat build)
 ```
 
-Needs Gradle 8.x and JDK 17 or newer (the plugin itself targets Java 8). The server-ready jar is
-`build/libs/BedWars1058-Replay-1.2.0.jar` (the dependency-free shadow jar, not a plain one).
+The included Gradle wrapper pins Gradle 8.14.3, which needs a JDK between 17 and 24 (the plugin itself targets Java 8).
+IntelliJ picks the wrapper up automatically. The server-ready jar is
+`build/libs/BedWars1058-Replay-1.3.1.jar` (the dependency-free shadow jar, not a plain one).
 
 ## Install
 
 1. Install PacketEvents and BedWars1058 on the server.
-2. Drop `BedWars1058-Replay-1.2.0.jar` into `plugins/` and **restart** (avoid hot-loading with plugin managers).
+2. Drop `BedWars1058-Replay-1.3.1.jar` into `plugins/` and **restart** (avoid hot-loading with plugin managers).
 3. Play a match - it is recorded automatically. `/replay` afterwards.
 
 ## Commands
@@ -44,6 +44,8 @@ Needs Gradle 8.x and JDK 17 or newer (the plugin itself targets Java 8). The ser
 | `/replay stop` | Leaves the replay you are watching |
 | `/replay reload` | Reloads `config.yml` (admin; storage changes need a restart) |
 | `/replay export <id> [world]` | Exports a replay to AdvancedReplay (admin, needs AdvancedReplay) |
+| `/replay inv` | While spectating: opens the followed player's inventory |
+| `/replay save` | Guests: saves the replay you are watching, if the host allows it |
 | `/replaysjoin [player]` | Opens the active-replays menu, or joins that player's replay |
 | `/replaytransfer <player>` | Host only: hands the host role to another viewer |
 
@@ -66,7 +68,7 @@ Needs Gradle 8.x and JDK 17 or newer (the plugin itself targets Java 8). The ser
 * **Hotbar** (host) - 1 slower, 2 back 10s, 3 pause / play, 4 forward 10s, 5 faster, 6 skip to time (left-click: type it, right-click: pick a moment), 9 **Replay menu**.
   Guests only get slot 9.
 * **Replay menu** - teleport to a player (left-click = teleport, right-click = first-person view, shift-click = their inventory) or to another viewer, match events, watch yourself, stop following, sharing settings (host), save this replay (guests, if allowed), leave.
-* **Punch to spectate** - with an empty slot selected, punch any replayed entity to view through its eyes; sneak to stop.
+* **Punch to spectate** - with an empty slot selected, punch any replayed entity to view through its eyes; sneak to stop. While spectating, your body is invisible to everyone, your hand shows what the player holds, and right-click or `/replay inv` opens their inventory.
 
 ## Configuration
 
@@ -77,6 +79,7 @@ Everything is in `plugins/BedWars1058-Replay/config.yml` (colour codes with `&`)
 * `retention` - `default-days` (0 = never delete), keep-forever / extend rules, who may delete.
 * `playback` - concurrent replay limit, speeds, skip seconds, sounds, invisible-player display, return world.
 * `sharing` - starting defaults for allow-join / whitelist-only / guest-save, lobby announcement, max viewers per replay.
+* `playback.health-display` - `OFF`, `NUMBER`, `HEARTS` or `BOTH`; `playback.spectate-client-mode` - opt-in real client spectator mode while spectating (no hand, info in the action bar).
 * `menu` and `messages` - every title and message is configurable.
 
 ## How one jar covers 1.8 - latest
@@ -88,13 +91,6 @@ so no removed class or constant is ever linked:
 * Materials and block states are resolved by name / PacketEvents state strings, so old data values and new block states both work.
 * Newer Bukkit APIs (profiles, scoreboards, attributes) are called reflectively and degrade gracefully when missing.
 * `api-version: 1.13` stops modern servers from treating the plugin as legacy; older servers ignore it.
-
-## Known limitations
-
-* Not every server version and plugin combination has been tested - report problems with the console log attached.
-* Sidebars from other plugins are only recorded if they use the standard scoreboard packets.
-* Baby, slime size and sheep colour are saved but not yet drawn in playback.
-* The AdvancedReplay export is a subset (no sounds, titles, scoreboards, name tags, inventories, per-player chat).
 
 ## Developer note
 This plugin is coded with AI assistance and architected completely by me. Regardless, use at your own risk.

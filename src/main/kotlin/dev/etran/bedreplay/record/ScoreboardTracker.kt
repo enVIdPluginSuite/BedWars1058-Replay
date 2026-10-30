@@ -44,11 +44,18 @@ class ScoreboardTracker {
 
     private fun legacy(c: net.kyori.adventure.text.Component?): String = if (c == null) "" else AdventureSerializer.toLegacyFormat(c)
 
+    /** Our own HUD / health objectives are not part of what the player sees in a match. */
+    private fun ours(name: String?) = name != null && (name.startsWith("brhud") || name == "brhp")
+
+    @Synchronized
+    fun sidebarObjective(): String? = sidebar
+
     @Synchronized
     fun handle(event: PacketSendEvent): Boolean {
         when (event.packetType) {
             PacketType.Play.Server.SCOREBOARD_OBJECTIVE -> {
                 val w = WrapperPlayServerScoreboardObjective(event)
+                if (ours(w.name)) return true
                 when (w.mode) {
                     WrapperPlayServerScoreboardObjective.ObjectiveMode.REMOVE -> {
                         objectives.remove(w.name)
@@ -62,6 +69,7 @@ class ScoreboardTracker {
             }
             PacketType.Play.Server.DISPLAY_SCOREBOARD -> {
                 val w = WrapperPlayServerDisplayScoreboard(event)
+                if (ours(w.scoreName)) return true
                 if (w.position == SIDEBAR_SLOT) {
                     sidebar = w.scoreName.takeIf { it.isNotEmpty() }
                     seenSidebarPackets = true
@@ -69,6 +77,7 @@ class ScoreboardTracker {
             }
             PacketType.Play.Server.UPDATE_SCORE -> {
                 val w = WrapperPlayServerUpdateScore(event)
+                if (ours(w.objectiveName)) return true
                 if (w.action == WrapperPlayServerUpdateScore.Action.REMOVE_ITEM) {
                     if (w.objectiveName.isNullOrEmpty()) objectives.values.forEach { it.scores.remove(w.entityName) }
                     else objectives[w.objectiveName]?.scores?.remove(w.entityName)
@@ -92,6 +101,7 @@ class ScoreboardTracker {
 
     private fun team(w: WrapperPlayServerTeams) {
         val name = w.teamName
+        if (ours(name)) return
         when (w.teamMode) {
             WrapperPlayServerTeams.TeamMode.REMOVE -> teams.remove(name)
             WrapperPlayServerTeams.TeamMode.ADD_ENTITIES -> teams.getOrPut(name) { Team() }.entries.addAll(w.players)

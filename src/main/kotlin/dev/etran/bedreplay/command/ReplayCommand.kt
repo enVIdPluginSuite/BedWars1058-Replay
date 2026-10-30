@@ -37,6 +37,8 @@ class ReplayCommand(
         if (!sender.hasPermission("bedreplay.use")) { sender.sendMessage(cfg.msg("no-permission")); return true }
         when (sub) {
             "stop", "leave" -> playback.stop(sender)
+            "inv", "inventory" -> playback.showFollowedInventory(sender)
+            "save" -> playback.saveCurrent(sender)
             "play" -> {
                 val id = args.getOrNull(1)
                 val r = id?.let { plugin.repository.get(it) }
@@ -46,7 +48,6 @@ class ReplayCommand(
                 } else playback.start(sender, r)
             }
             else -> {
-                if (playback.isWatching(sender)) { sender.sendMessage(cfg.msg("no-permission")); return true }
                 menu().open(sender)
             }
         }
@@ -105,7 +106,7 @@ class ReplayCommand(
             return s.otherViewers.map { it.viewer.name }.filter { it.startsWith(args[0], true) }
         }
         if (args.size == 1) {
-            val base = mutableListOf("stop")
+            val base = mutableListOf("stop", "inv", "save")
             if (sender.hasPermission("bedreplay.admin")) { base += "reload"; base += "export" }
             return base.filter { it.startsWith(args[0], true) }
         }
