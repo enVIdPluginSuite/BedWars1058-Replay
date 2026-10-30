@@ -1,0 +1,20 @@
+name: BedWars1058-Replay
+main: dev.etran.bedreplay.BedReplayPlugin
+version: ${version}
+api-version: "1.13"
+author: etran
+description: Hypixel-style automatic match replays for BedWars1058.
+depend: [packetevents]
+softdepend: [BedWars1058, BedWars2023, AdvancedReplay]
+commands:
+  replay:
+    description: Open your match replays
+    usage: /replay [stop|reload|export <id> [world]]
+    aliases: [replays, bedreplay]
+permissions:
+  bedreplay.use:
+    description: Open the replay menu and watch your own matches
+    default: true
+  bedreplay.admin:
+    description: See and manage every replay
+    default: op

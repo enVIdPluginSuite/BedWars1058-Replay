@@ -1,0 +1,97 @@
+# BedWars1058-Replay configuration
+# Colour codes use & (e.g. &a). Reload with /replay reload (storage changes need a restart).
+
+storage:
+  # FILE  = replays are local files in plugins/BedWars1058-Replay/replays (default, recommended)
+  # MYSQL = replays are stored in a MySQL / MariaDB database (shared between servers)
+  type: FILE
+  mysql:
+    host: localhost
+    port: 3306
+    database: bedreplay
+    user: root
+    password: ""
+    table-prefix: bedreplay_
+    use-ssl: false
+
+recording:
+  enabled: true
+  # Recordings shorter than this are thrown away (e.g. a match that was cancelled immediately).
+  min-duration-seconds: 20
+  # Keep recording this long after the game ends (victory screen) before saving.
+  post-game-seconds: 8
+  # How often the recording is flushed to disk, so a crash loses at most this much.
+  flush-interval-seconds: 5
+  record-chat: true
+  record-blocks: true
+  # Dropped items, arrows, TNT, fireballs, golems, silverfish, villagers, armor stands ...
+  record-entities: true
+  # Sounds, titles / action bars, and sidebar scoreboards + name tags (team prefixes) as players saw them.
+  record-sounds: true
+  record-titles: true
+  record-scoreboards: true
+  # Full player inventories, and the contents of chests / ender chests / furnaces whenever players open them.
+  record-inventories: true
+
+retention:
+  # Days a replay is kept before it is deleted automatically. 0 = never delete.
+  default-days: 14
+  # Can players in a match mark their replay "keep forever" from the menu?
+  allow-keep-forever: true
+  # Can players extend the expiry from the menu, and by how many days at most in total?
+  allow-extend: true
+  extend-step-days: 7
+  max-total-days: 90
+  # Can participants delete their own replays? (admins always can)
+  players-can-delete: false
+  cleanup-interval-minutes: 30
+
+playback:
+  # Each viewer gets a private copy of the map, so this bounds memory and disk usage.
+  max-concurrent: 5
+  world-prefix: bedreplay_
+  # Allowed speeds in the order the speed buttons step through them.
+  speeds: [0.25, 0.5, 1.0, 2.0, 4.0, 8.0]
+  default-speed: 1.0
+  skip-seconds: 10
+  play-sounds: true
+  # Invisible players are always recorded. true = drawn as a faint "(invisible)" player so you can
+  # still follow them; false = drawn invisible like in the match.
+  show-invisible-players: true
+  # Where viewers are sent when playback ends. Empty = the world they started from.
+  return-world: ""
+
+menu:
+  title: "&8Match Replays"
+  admin-title: "&8Match Replays &c(admin)"
+
+messages:
+  prefix: "&8[&bReplay&8] &7"
+  recording-saved: "Replay &f{id}&7 saved (&f{duration}&7)."
+  no-permission: "&cYou do not have permission to do that."
+  not-found: "&cThat replay no longer exists."
+  playback-busy: "&cToo many replays are being watched right now, try again shortly."
+  loading: "Loading replay..."
+  load-failed: "&cThe replay could not be loaded."
+  map-missing: "&cThe map for this replay is not available, so it cannot be played back."
+  now-playing: "Now watching &f{map}&7. Use the hotbar to control playback."
+  paused: "Paused"
+  resumed: "Playing"
+  speed: "Speed: &f{speed}x"
+  jumped: "Jumped to &f{time}"
+  type-time: "Type a time in chat, e.g. &f3:45&7 or &f+30&7 / &f-30&7 (seconds). Type &fcancel&7 to abort."
+  bad-time: "&cCould not read that time."
+  following: "Following &f{player}&7."
+  stopped-following: "No longer following anyone."
+  keep-on: "This replay will be kept forever."
+  keep-off: "This replay will expire in &f{days}&7 days."
+  extended: "Replay extended. It now expires in &f{days}&7 days."
+  deleted: "Replay deleted."
+  playback-ended: "Replay finished."
+  reloaded: "Configuration reloaded."
+  export-no-advancedreplay: "&cAdvancedReplay is not installed on this server."
+  export-started: "Exporting &f{id}&7 for AdvancedReplay..."
+  export-done: "Exported as &f{name}&7. Load it with &f/replay play {name}&7 in AdvancedReplay; it plays in the world named &f{world}&7, which must exist."
+  export-skipped: " &8(AdvancedReplay cannot store: {list})"
+  export-failed: "&cExport failed: {reason}"
+  no-container: "&cNo ender chest was recorded for that player."
