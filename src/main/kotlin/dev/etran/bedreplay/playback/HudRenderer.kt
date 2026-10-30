@@ -111,6 +111,18 @@ class HudRenderer(private val plugin: Plugin, private val viewer: Player) {
         }
     }
 
+    /**
+     * Lobby scoreboard / tab plugins re-assign a player's scoreboard when they change world, and again whenever they
+     * refresh. Take it back if that happened, so the replay sidebar stays on screen.
+     */
+    fun reassert() {
+        val sb = board ?: return
+        try {
+            if (viewer.scoreboard !== sb) viewer.scoreboard = sb
+        } catch (_: Throwable) {
+        }
+    }
+
     private fun hideSidebar() {
         objective?.unregister()
         objective = null

@@ -86,7 +86,8 @@ class Ent(val rid: Int, val kind: String) {
  */
 class NpcRenderer(
     private val plugin: Plugin,
-    private val viewer: Player,
+    /** Everyone currently watching; entities are shown to all of them (they share ids, so packets are identical). */
+    private val targets: () -> Collection<Player>,
     private val players: Map<Int, PlayerInfo>,
     private val skinLayers: Boolean = true,
     /** Draw invisible players as faint "(invisible)" players instead of not at all. */
@@ -96,15 +97,37 @@ class NpcRenderer(
     private val sv: ServerVersion = PacketEvents.getAPI().serverManager.version
     private var warned = false
 
+    /** While set, packets go to this one viewer only (a viewer joining late, or leaving). */
+    private var only: Player? = null
+
     private fun send(w: PacketWrapper<*>) {
-        try {
-            pm.sendPacket(viewer, w)
-        } catch (t: Throwable) {
-            if (!warned) {
-                warned = true
-                plugin.logger.log(Level.WARNING, "Replay packet could not be sent (${w.javaClass.simpleName}); further failures are silent", t)
+        val list = only?.let { listOf(it) } ?: targets()
+        for (p in list) {
+            try {
+                pm.sendPacket(p, w)
+            } catch (t: Throwable) {
+                if (!warned) {
+                    warned = true
+                    plugin.logger.log(Level.WARNING, "Replay packet could not be sent (${w.javaClass.simpleName}); further failures are silent", t)
+                }
             }
         }
+    }
+
+    private inline fun toOnly(p: Player, block: () -> Unit) {
+        val prev = only
+        only = p
+        try { block() } finally { only = prev }
+    }
+
+    /** Shows everything that is already spawned to a viewer who joined after playback started. */
+    fun spawnFor(p: Player, ents: Collection<Ent>) {
+        toOnly(p) { for (e in ents) if (e.spawned) sendSpawn(e) }
+    }
+
+    /** Removes everything from one viewer's client (they are leaving, the others keep watching). */
+    fun despawnFor(p: Player, ents: Collection<Ent>) {
+        toOnly(p) { for (e in ents) if (e.spawned) destroyPackets(e) }
     }
 
     // ------------------------------------------------------------------ spawn / despawn
@@ -113,6 +136,11 @@ class NpcRenderer(
         if (e.spawned) return
         e.liveId = SpigotReflectionUtil.generateEntityId()
         e.uuid = UUID.randomUUID()
+        sendSpawn(e)
+    }
+
+    /** Sends the spawn packets for an entity that already has its ids, to the current targets. */
+    private fun sendSpawn(e: Ent) {
         if (e.isPlayer) spawnPlayer(e) else spawnOther(e) ?: return
         e.spawned = true
         applyAppearance(e)
@@ -185,8 +213,13 @@ class NpcRenderer(
     fun remove(e: Ent) {
         if (!e.spawned) return
         e.spawned = false
+        destroyPackets(e)
+        e.tagSent = null
+    }
+
+    private fun destroyPackets(e: Ent) {
         send(WrapperPlayServerDestroyEntities(e.liveId))
-        if (e.isPlayer) removeTeam(e)
+        if (e.isPlayer && e.tagSent != null) send(WrapperPlayServerTeams(teamName(e), WrapperPlayServerTeams.TeamMode.REMOVE, null as WrapperPlayServerTeams.ScoreBoardTeamInfo?))
         if (e.isPlayer && sv.isNewerThanOrEquals(ServerVersion.V_1_19_3)) send(WrapperPlayServerPlayerInfoRemove(e.uuid))
     }
 
@@ -239,8 +272,9 @@ class NpcRenderer(
         var suffix = e.suffix
         if (ghostInvisible && e.flags and Flag.INVISIBLE != 0) suffix += " §7(invisible)"
         val sig = "$prefix|$suffix|${e.tagHidden}"
-        val first = e.tagSent == null
-        if (sig == e.tagSent) return
+        // A viewer who just joined has no team yet, so it must be created for them even if others already have it.
+        val first = e.tagSent == null || only != null
+        if (sig == e.tagSent && only == null) return
         e.tagSent = sig
 
         val visibility = if (e.tagHidden) WrapperPlayServerTeams.NameTagVisibility.NEVER else WrapperPlayServerTeams.NameTagVisibility.ALWAYS
@@ -255,12 +289,6 @@ class NpcRenderer(
         )
         val mode = if (first) WrapperPlayServerTeams.TeamMode.CREATE else WrapperPlayServerTeams.TeamMode.UPDATE
         send(WrapperPlayServerTeams(teamName(e), mode, teamInfo, listOf(name)))
-    }
-
-    private fun removeTeam(e: Ent) {
-        if (e.tagSent == null) return
-        e.tagSent = null
-        send(WrapperPlayServerTeams(teamName(e), WrapperPlayServerTeams.TeamMode.REMOVE, null as WrapperPlayServerTeams.ScoreBoardTeamInfo?))
     }
 
     private fun nearestColorCode(rgb: Int): Char {
@@ -290,8 +318,8 @@ class NpcRenderer(
     }
 
     /** Camera attaches the viewer's first-person view to an entity (like spectating it). */
-    fun camera(e: Ent?) {
-        send(WrapperPlayServerCamera(if (e != null && e.spawned) e.liveId else viewer.entityId))
+    fun camera(p: Player, e: Ent?) {
+        toOnly(p) { send(WrapperPlayServerCamera(if (e != null && e.spawned) e.liveId else p.entityId)) }
     }
 
     /** Everything that is not position: equipment, flags, skin layers, item stack. */

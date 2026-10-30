@@ -2,9 +2,11 @@ package dev.etran.bedreplay.playback
 
 import dev.etran.bedreplay.bedwars.BedWarsBridge
 import dev.etran.bedreplay.config.PluginConfig
+import dev.etran.bedreplay.gui.ControlMenu
 import dev.etran.bedreplay.gui.InventoryViewMenus
 import dev.etran.bedreplay.gui.PlayerPickerMenu
 import dev.etran.bedreplay.gui.TimelineMenu
+import dev.etran.bedreplay.settings.PlayerSettingsStore
 import dev.etran.bedreplay.storage.ReplayRepository
 import dev.etran.bedreplay.storage.StoredReplay
 import org.bukkit.Bukkit
@@ -36,22 +38,48 @@ class PlaybackController(
     private val config: () -> PluginConfig,
     private val repo: ReplayRepository,
     private val bridge: BedWarsBridge,
+    val settings: PlayerSettingsStore,
 ) : Listener {
     private val sessions = HashMap<UUID, PlaybackSession>()
+    private val rooms = LinkedHashSet<ReplayRoom>()
+    /** One-shot chat prompts (type a player name ...), keyed by player. */
+    private val pendingInput = java.util.concurrent.ConcurrentHashMap<UUID, (String) -> Unit>()
     private val starting = HashSet<UUID>()
     private val lastClick = HashMap<UUID, Long>()
     private val stateDir = File(plugin.dataFolder, "viewerstate")
 
-    fun isWatching(p: Player) = sessions.containsKey(p.uniqueId)
-    fun session(p: Player): PlaybackSession? = sessions[p.uniqueId]
+    private fun active(id: UUID): PlaybackSession? {
+        val s = sessions[id] ?: return null
+        if (s.ended) { sessions.remove(id); return null }
+        return s
+    }
+
+    private fun isActive(id: UUID) = active(id) != null
+
+    fun isWatching(p: Player) = isActive(p.uniqueId)
+    fun session(p: Player): PlaybackSession? = active(p.uniqueId)
+    fun rooms(): List<ReplayRoom> = rooms.filter { !it.ended }
+
+    /** Ask for a line of chat from [p]; it is consumed instead of being sent to the server. */
+    fun prompt(p: Player, message: String, handler: (String) -> Unit) {
+        pendingInput[p.uniqueId] = handler
+        p.sendMessage(message)
+    }
+
+    /** May [p] join the replay [room]? Admins always may; everyone else follows the host's settings. */
+    fun mayJoin(p: Player, room: ReplayRoom): Boolean {
+        if (room.ended || room.host.viewer.uniqueId == p.uniqueId) return false
+        if (p.hasPermission("bedreplay.admin")) return true
+        return p.hasPermission("bedreplay.use") && room.hostSettings.mayJoin(p.uniqueId)
+    }
 
     // ------------------------------------------------------------------ lifecycle
 
     fun start(viewer: Player, r: StoredReplay) {
         val cfg = config()
         val id = viewer.uniqueId
-        if (sessions.containsKey(id) || !starting.add(id)) return
-        if (sessions.size + starting.size - 1 >= cfg.maxConcurrentPlayback) {
+        if (isActive(id) || !starting.add(id)) return
+        if (rooms().size + starting.size - 1 >= cfg.maxConcurrentPlayback) {
             starting.remove(id); viewer.sendMessage(cfg.msg("playback-busy")); return
         }
         if (bridge.arenaOf(viewer) != null) {
@@ -71,26 +99,79 @@ class PlaybackController(
                 if (!viewer.isOnline) {
                     PlaybackWorlds.destroy(plugin, world); return@prepare abort("load-failed")
                 }
-                val s = PlaybackSession(plugin, cfg, viewer, r, replay, world, stateDir) { ended ->
-                    sessions.remove(ended.viewer.uniqueId); repo.release(ended.stored.id)
+                val room = ReplayRoom(plugin, cfg, r, replay, world, stateDir, { settings.get(it) }) { ended ->
+                    rooms.remove(ended); repo.release(ended.stored.id)
                 }
+                val s = PlaybackSession(plugin, cfg, viewer, room, stateDir)
                 starting.remove(id)
+                rooms += room
                 sessions[id] = s
                 try {
-                    s.begin(ViewerState.fileFor(stateDir, id))
+                    room.start(s)
+                    announce(room)
                 } catch (t: Throwable) {
                     plugin.logger.log(java.util.logging.Level.WARNING, "Could not start playback", t)
-                    s.stop()
+                    room.shutdown()
                     viewer.sendMessage(cfg.msg("load-failed"))
                 }
             }
         }
     }
 
-    fun stop(p: Player) { sessions[p.uniqueId]?.stop() }
+    /** Joins [guest] to [room] as a viewer, after checking they are allowed to. */
+    fun join(guest: Player, room: ReplayRoom) {
+        val cfg = config()
+        if (isActive(guest.uniqueId)) { guest.sendMessage(cfg.msg("join-already")); return }
+        if (bridge.arenaOf(guest) != null) { guest.sendMessage(cfg.msg("join-in-game")); return }
+        if (!mayJoin(guest, room)) { guest.sendMessage(cfg.msg("join-denied")); return }
+        if (!room.canAdd()) { guest.sendMessage(cfg.msg("join-full")); return }
+        val s = PlaybackSession(plugin, cfg, guest, room, stateDir)
+        sessions[guest.uniqueId] = s
+        try {
+            room.join(s)
+        } catch (t: Throwable) {
+            plugin.logger.log(java.util.logging.Level.WARNING, "Could not join replay", t)
+            s.stop()
+            guest.sendMessage(cfg.msg("load-failed"))
+        }
+    }
+
+    /** The room hosted by the player called [name], if any. */
+    fun roomOf(name: String): ReplayRoom? =
+        rooms().firstOrNull { it.host.viewer.name.equals(name, ignoreCase = true) }
+            ?: rooms().firstOrNull { r -> r.members.values.any { it.viewer.name.equals(name, ignoreCase = true) } }
+
+    /** Tells everyone in the lobby who may join that a replay is open, with a clickable join message. */
+    fun announce(room: ReplayRoom) {
+        val cfg = config()
+        if (!cfg.sharingAnnounce || !room.hostSettings.allowJoin) return
+        val host = room.host.viewer
+        for (p in Bukkit.getOnlinePlayers()) {
+            if (p.uniqueId == host.uniqueId || isActive(p.uniqueId)) continue
+            if (bridge.arenaOf(p) != null) continue
+            if (!mayJoin(p, room)) continue
+            val text = cfg.msg("announce", "host" to host.name, "map" to room.mapName)
+            val hover = cfg.msg("announce-hover", "host" to host.name, prefix = false)
+            if (!ClickableChat.send(p, text, "/replaysjoin ${host.name}", hover)) p.sendMessage(text + " §7(/replaysjoin ${host.name})")
+        }
+    }
+
+    /** Hands the host role to [name], who must be in the same replay as [from]. */
+    fun transfer(from: Player, name: String) {
+        val cfg = config()
+        val s = active(from.uniqueId)
+        if (s == null) { from.sendMessage(cfg.msg("not-watching")); return }
+        if (!s.isHost) { from.sendMessage(cfg.msg("host-only")); return }
+        val target = s.room.members.values.firstOrNull { it.viewer.name.equals(name, ignoreCase = true) && it !== s }
+        if (target == null) { from.sendMessage(cfg.msg("transfer-not-member")); return }
+        s.room.transfer(target)
+    }
+
+    fun stop(p: Player) { active(p.uniqueId)?.stop() }
 
     fun shutdown() {
-        for (s in ArrayList(sessions.values)) s.stop()
+        for (r in ArrayList(rooms)) r.shutdown()
+        rooms.clear()
         sessions.clear()
     }
 
@@ -98,7 +179,7 @@ class PlaybackController(
 
     @EventHandler(priority = EventPriority.HIGH)
     fun onInteract(e: PlayerInteractEvent) {
-        val s = sessions[e.player.uniqueId] ?: return
+        val s = active(e.player.uniqueId) ?: return
         e.isCancelled = true
         if (e.action == Action.PHYSICAL) return
         // 1.9+ fires once per hand; 1.8 fires a left-click per swing. Debounce both.
@@ -114,7 +195,10 @@ class PlaybackController(
         }
 
         val right = e.action == Action.RIGHT_CLICK_AIR || e.action == Action.RIGHT_CLICK_BLOCK
-        when (e.player.inventory.heldItemSlot) {
+        val slot = e.player.inventory.heldItemSlot
+        if (slot == 8) { ControlMenu.open(s); return }
+        if (!s.isHost) return // guests only have the menu; the host runs the timeline
+        when (slot) {
             0 -> s.slower()
             1 -> s.skipSeconds(-config().skipSeconds)
             2 -> s.togglePause()
@@ -123,17 +207,20 @@ class PlaybackController(
             5 -> if (right) TimelineMenu.open(s) else {
                 s.awaitingTime = true; e.player.sendMessage(config().msg("type-time"))
             }
-            6 -> PlayerPickerMenu.open(s)
-            7 -> TimelineMenu.open(s)
-            8 -> s.stop()
         }
     }
 
     @EventHandler(priority = EventPriority.LOWEST)
     fun onChat(e: AsyncPlayerChatEvent) {
         // Replay viewers neither see live server chat nor speak into it.
-        e.recipients.removeIf { sessions.containsKey(it.uniqueId) }
-        val s = sessions[e.player.uniqueId] ?: return
+        e.recipients.removeIf { isActive(it.uniqueId) }
+        pendingInput.remove(e.player.uniqueId)?.let { handler ->
+            e.isCancelled = true
+            val text = e.message
+            Bukkit.getScheduler().runTask(plugin, Runnable { handler(text) })
+            return
+        }
+        val s = active(e.player.uniqueId) ?: return
         e.isCancelled = true
         if (!s.awaitingTime) return
         val text = e.message
@@ -149,9 +236,9 @@ class PlaybackController(
 
     @EventHandler(priority = EventPriority.HIGH)
     fun onCommand(e: PlayerCommandPreprocessEvent) {
-        if (!sessions.containsKey(e.player.uniqueId) || e.player.hasPermission("bedreplay.admin")) return
+        if (!isActive(e.player.uniqueId) || e.player.hasPermission("bedreplay.admin")) return
         val cmd = e.message.trim().removePrefix("/").substringBefore(' ').lowercase().substringAfter(':')
-        if (cmd != "replay" && cmd != "bedreplay") { e.isCancelled = true }
+        if (cmd !in ALLOWED_COMMANDS) { e.isCancelled = true }
     }
 
     // ------------------------------------------------------------------ keep the viewer harmless
@@ -159,34 +246,34 @@ class PlaybackController(
     @EventHandler(priority = EventPriority.HIGH)
     fun onInvClick(e: InventoryClickEvent) {
         val p = e.whoClicked as? Player ?: return
-        if (sessions.containsKey(p.uniqueId)) e.isCancelled = true
+        if (isActive(p.uniqueId)) e.isCancelled = true
     }
 
     @EventHandler(priority = EventPriority.HIGH)
     fun onInvDrag(e: InventoryDragEvent) {
         val p = e.whoClicked as? Player ?: return
-        if (sessions.containsKey(p.uniqueId)) e.isCancelled = true
+        if (isActive(p.uniqueId)) e.isCancelled = true
     }
 
     @EventHandler(priority = EventPriority.HIGH)
-    fun onDrop(e: PlayerDropItemEvent) { if (sessions.containsKey(e.player.uniqueId)) e.isCancelled = true }
+    fun onDrop(e: PlayerDropItemEvent) { if (isActive(e.player.uniqueId)) e.isCancelled = true }
 
     @EventHandler(priority = EventPriority.HIGH)
-    fun onBreak(e: BlockBreakEvent) { if (sessions.containsKey(e.player.uniqueId)) e.isCancelled = true }
+    fun onBreak(e: BlockBreakEvent) { if (isActive(e.player.uniqueId)) e.isCancelled = true }
 
     @EventHandler(priority = EventPriority.HIGH)
-    fun onPlace(e: BlockPlaceEvent) { if (sessions.containsKey(e.player.uniqueId)) e.isCancelled = true }
+    fun onPlace(e: BlockPlaceEvent) { if (isActive(e.player.uniqueId)) e.isCancelled = true }
 
     @EventHandler(priority = EventPriority.HIGH)
     fun onDamage(e: EntityDamageEvent) {
         val p = e.entity as? Player ?: return
-        if (sessions.containsKey(p.uniqueId)) e.isCancelled = true
+        if (isActive(p.uniqueId)) e.isCancelled = true
     }
 
     @EventHandler(priority = EventPriority.HIGH)
     fun onFood(e: FoodLevelChangeEvent) {
         val p = e.entity as? Player ?: return
-        if (sessions.containsKey(p.uniqueId)) e.isCancelled = true
+        if (isActive(p.uniqueId)) e.isCancelled = true
     }
 
     // ------------------------------------------------------------------ join / quit
@@ -196,7 +283,7 @@ class PlaybackController(
         val id = e.player.uniqueId
         lastClick.remove(id)
         // The saved state file stays on disk and is restored on the next join.
-        sessions[id]?.stop(restore = false)
+        active(id)?.stop(restore = false)
     }
 
     /** Restores a viewer whose server crashed (or who quit) mid-replay. */
@@ -206,7 +293,7 @@ class PlaybackController(
         val file = ViewerState.fileFor(stateDir, p.uniqueId)
         if (!file.isFile) return
         Bukkit.getScheduler().runTaskLater(plugin, Runnable {
-            if (!p.isOnline || sessions.containsKey(p.uniqueId)) return@Runnable
+            if (!p.isOnline || isActive(p.uniqueId)) return@Runnable
             val state = ViewerState.load(file)
             if (state != null) {
                 val back = state.location()
@@ -217,5 +304,9 @@ class PlaybackController(
             }
             file.delete()
         }, 5L)
+    }
+
+    private companion object {
+        val ALLOWED_COMMANDS = setOf("replay", "replays", "bedreplay", "replaysjoin", "replaytransfer")
     }
 }

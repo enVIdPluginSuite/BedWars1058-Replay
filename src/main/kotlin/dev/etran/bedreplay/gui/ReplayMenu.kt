@@ -24,7 +24,7 @@ class ReplayMenu(
     fun open(p: Player, page: Int = 0, allMatches: Boolean = false) {
         val admin = p.hasPermission("bedreplay.admin")
         val showAll = admin && allMatches
-        val list = repo.visibleTo(p.uniqueId, showAll)
+        val list = repo.visibleTo(p.uniqueId, showAll, ReplayServices.settings.get(p.uniqueId).savedSnapshot())
         val pages = ((list.size + perPage - 1) / perPage).coerceAtLeast(1)
         val pg = page.coerceIn(0, pages - 1)
 
@@ -43,6 +43,9 @@ class ReplayMenu(
             menu.set(47, Items.make(Items.BEACON, if (showAll) "§cShowing: all matches" else "§aShowing: my matches",
                 listOf("§7Click to switch"))) { w, _ -> open(w, 0, !showAll) }
         }
+        menu.set(50, Items.make(Items.BOOK, "§bSharing settings", listOf("§7Who may join your replays,", "§7your whitelist, guest saving"))) { w, _ -> SharingMenu.open(w, null) }
+        val joinable = ReplayServices.controller.rooms().count { ReplayServices.controller.mayJoin(p, it) }
+        menu.set(51, Items.make(Items.BEACON, "§aActive replays §7($joinable)", listOf("§7Join a replay someone else", "§7is watching right now"))) { w, _ -> ActiveReplaysMenu.open(w) }
         menu.open(p)
     }
 

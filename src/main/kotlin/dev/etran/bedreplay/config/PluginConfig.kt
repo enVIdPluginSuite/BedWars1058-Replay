@@ -60,6 +60,11 @@ class PluginConfig(private val c: FileConfiguration) {
     val skipSeconds = c.getInt("playback.skip-seconds", 10).coerceAtLeast(1)
     val playSounds = c.getBoolean("playback.play-sounds", true)
     val showInvisibleAsGhost = c.getBoolean("playback.show-invisible-players", true)
+    val sharingDefaultAllowJoin = c.getBoolean("sharing.default-allow-join", false)
+    val sharingDefaultWhitelistOnly = c.getBoolean("sharing.default-whitelist-only", false)
+    val sharingDefaultGuestSave = c.getBoolean("sharing.default-guest-save", false)
+    val sharingAnnounce = c.getBoolean("sharing.announce-to-lobby", true)
+    val sharingMaxViewers = c.getInt("sharing.max-viewers-per-replay", 20).coerceAtLeast(1)
     val returnWorld = c.getString("playback.return-world", "")!!
 
     val menuTitle = color(c.getString("menu.title", "&8Match Replays")!!)

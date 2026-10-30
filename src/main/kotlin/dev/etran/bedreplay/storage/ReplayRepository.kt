@@ -43,9 +43,9 @@ class ReplayRepository(
      * What a player may see in the menu: replays they took part in, or everything for admins.
      * Always de-duplicated by id and newest first.
      */
-    fun visibleTo(uuid: UUID, admin: Boolean): List<StoredReplay> =
+    fun visibleTo(uuid: UUID, admin: Boolean, saved: Set<String> = emptySet()): List<StoredReplay> =
         index.asSequence()
-            .filter { admin || it.hasParticipant(uuid) }
+            .filter { admin || it.hasParticipant(uuid) || it.id in saved }
             .distinctBy { it.id }
             .sortedByDescending { it.startedAtMillis }
             .toList()

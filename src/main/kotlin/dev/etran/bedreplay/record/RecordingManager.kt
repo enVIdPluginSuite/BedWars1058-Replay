@@ -50,6 +50,7 @@ class RecordingManager(
         spoolDir.mkdirs()
         plugin.server.pluginManager.registerEvents(this, plugin)
         task = Bukkit.getScheduler().runTaskTimer(plugin, Runnable { tickAll() }, 1L, 1L)
+        registerDragonEvent()
         recoverOrphans()
     }
 
@@ -204,6 +205,39 @@ class RecordingManager(
         byWorld[e.block.world.uid]?.explosion(e.blockList())
     }
 
+    // Verification handlers: these also run for cancelled events, because other plugins (BedWars' own dragon and
+    // explosion handling) often cancel and then remove the blocks themselves.
+    @EventHandler(priority = EventPriority.MONITOR)
+    fun onExplodeVerify(e: EntityExplodeEvent) {
+        byWorld[e.entity.world.uid]?.watchBlocks(e.blockList())
+    }
+
+    @EventHandler(priority = EventPriority.MONITOR)
+    fun onBlockExplodeVerify(e: BlockExplodeEvent) {
+        byWorld[e.block.world.uid]?.watchBlocks(e.blockList())
+    }
+
+    @EventHandler(priority = EventPriority.MONITOR)
+    fun onEntityChangeBlock(e: org.bukkit.event.entity.EntityChangeBlockEvent) {
+        byWorld[e.block.world.uid]?.watchBlocks(listOf(e.block))
+    }
+
+    /** EnderDragonChangeBlockEvent does not exist before 1.9, so it is registered by name. */
+    private fun registerDragonEvent() {
+        try {
+            @Suppress("UNCHECKED_CAST")
+            val cls = Class.forName("org.bukkit.event.entity.EnderDragonChangeBlockEvent") as Class<out org.bukkit.event.Event>
+            val getBlock = cls.getMethod("getBlock")
+            plugin.server.pluginManager.registerEvent(cls, this, EventPriority.MONITOR, { _, event ->
+                if (cls.isInstance(event)) {
+                    val b = getBlock.invoke(event) as org.bukkit.block.Block
+                    byWorld[b.world.uid]?.watchBlocks(listOf(b))
+                }
+            }, plugin)
+        } catch (_: Throwable) {
+        }
+    }
+
     @EventHandler(priority = EventPriority.MONITOR)
     fun onSwing(e: PlayerAnimationEvent) {
         val id = e.player.uniqueId
@@ -218,6 +252,11 @@ class RecordingManager(
             return
         }
         byPlayer[p.uniqueId]?.animation(p.uniqueId, Anim.HURT)
+    }
+
+    @EventHandler(priority = EventPriority.MONITOR)
+    fun onQuit(e: org.bukkit.event.player.PlayerQuitEvent) {
+        ScoreboardRegistry.forget(e.player.uniqueId)
     }
 
     @EventHandler(priority = EventPriority.MONITOR)

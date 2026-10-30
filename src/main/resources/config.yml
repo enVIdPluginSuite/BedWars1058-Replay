@@ -61,6 +61,17 @@ playback:
   # Where viewers are sent when playback ends. Empty = the world they started from.
   return-world: ""
 
+sharing:
+  # Shared replays: the player who started a replay is its host and controls the timeline; others can join and watch.
+  # These are only the starting values; every player's own choices are remembered in plugins/BedWars1058-Replay/playerdata.
+  default-allow-join: false
+  default-whitelist-only: false
+  # Let guests who were not in the match add the replay to their own list.
+  default-guest-save: false
+  # Tell players in the lobby (clickable) when someone starts a replay they may join.
+  announce-to-lobby: true
+  max-viewers-per-replay: 20
+
 menu:
   title: "&8Match Replays"
   admin-title: "&8Match Replays &c(admin)"
@@ -95,3 +106,32 @@ messages:
   export-skipped: " &8(AdvancedReplay cannot store: {list})"
   export-failed: "&cExport failed: {reason}"
   no-container: "&cNo ender chest was recorded for that player."
+  following-waiting: "Following &f{player}&7; the camera attaches when they are back in the match."
+  joined: "You joined &f{host}&7's replay of &f{map}&7."
+  guest-joined: "&f{player}&7 joined the replay."
+  guest-left: "&f{player}&7 left the replay."
+  join-denied: "&cYou cannot join that replay."
+  join-full: "&cThat replay is full."
+  join-not-found: "&cNobody by that name is hosting a replay."
+  join-already: "&cYou are already watching a replay."
+  join-in-game: "&cYou cannot join a replay while you are in a match."
+  host-only: "&cOnly the host of this replay can do that."
+  announce: "&f{host}&7 is watching a replay of &f{map}&7. &a[Click to join]"
+  announce-hover: "Join {host}'s replay"
+  transfer-done: "&f{player}&7 is now the host of this replay."
+  transfer-you: "You are now the host of this replay. Sharing settings are now yours."
+  transfer-usage: "&cUsage: /replaytransfer <player in this replay>"
+  transfer-not-member: "&cThat player is not watching this replay."
+  not-watching: "&cYou are not watching a replay."
+  host-left: "The host left. &f{player}&7 is the new host."
+  setting-allow-join: "Joining your replays: &f{value}"
+  setting-whitelist-only: "Whitelist only: &f{value}"
+  setting-guest-save: "Guests may save the replay: &f{value}"
+  whitelist-added: "&f{player}&7 is now on your whitelist."
+  whitelist-removed: "&f{player}&7 was removed from your whitelist."
+  whitelist-prompt: "Type the name of a player to whitelist, or &fcancel&7."
+  whitelist-unknown: "&cI don't know a player called that (they must have joined this server before)."
+  save-denied: "&cThe host does not allow saving this replay."
+  save-already: "&cThis replay is already in your list."
+  saved: "Replay saved to your list. Find it with &f/replay&7."
+  kicked-host-ended: "The host ended the replay."

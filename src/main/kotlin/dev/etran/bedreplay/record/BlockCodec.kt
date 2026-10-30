@@ -49,13 +49,16 @@ object BlockCodec {
         }
     }
 
+    private val getBlockData = try { org.bukkit.block.Block::class.java.getMethod("getBlockData") } catch (_: Throwable) { null }
+    private val fromBukkitBlockData = try {
+        SpigotConversionUtil::class.java.methods.firstOrNull { it.name == "fromBukkitBlockData" }
+    } catch (_: Throwable) { null }
+
     /** The block currently at a position, in canonical form, or null if it cannot be encoded. */
     fun current(world: World, x: Int, y: Int, z: Int): String? = try {
         val block = world.getBlockAt(x, y, z)
         if (ServerCompat.modern) {
-            val data = block.javaClass.getMethod("getBlockData").invoke(block)
-            val from = SpigotConversionUtil::class.java.methods.first { it.name == "fromBukkitBlockData" }
-            from.invoke(null, data).toString()
+            fromBukkitBlockData!!.invoke(null, getBlockData!!.invoke(block)).toString()
         } else {
             @Suppress("DEPRECATION")
             SpigotConversionUtil.fromBukkitMaterialData(org.bukkit.material.MaterialData(block.type, block.data)).toString()

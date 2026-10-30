@@ -51,12 +51,29 @@ class PacketCapture(
     private val captureBlocks: Boolean,
     private val captureSounds: Boolean = true,
     private val captureTitles: Boolean = true,
+    private val captureScoreboards: Boolean = true,
 ) : PacketListenerAbstract(PacketListenerPriority.MONITOR) {
 
     private var reportedFailure = false
 
+    private fun failed(t: Throwable) {
+        if (!reportedFailure) {
+            reportedFailure = true
+            log.log(Level.WARNING, "Packet capture failed once (further failures are silent)", t)
+        }
+    }
+
+    private fun isScoreboardPacket(t: com.github.retrooper.packetevents.protocol.packettype.PacketTypeCommon) =
+        t == PacketType.Play.Server.SCOREBOARD_OBJECTIVE || t == PacketType.Play.Server.DISPLAY_SCOREBOARD ||
+            t == PacketType.Play.Server.UPDATE_SCORE || t == PacketType.Play.Server.RESET_SCORE || t == PacketType.Play.Server.TEAMS
+
     override fun onPacketSend(event: PacketSendEvent) {
         val uuid = event.user?.uuid ?: return
+        // Scoreboards are tracked for everybody, always: the in-game sidebar is usually sent before recording starts.
+        if (captureScoreboards && isScoreboardPacket(event.packetType)) {
+            try { ScoreboardRegistry.of(uuid).handle(event) } catch (t: Throwable) { failed(t) }
+            return
+        }
         if (!sink.wants(uuid)) return
         try {
             when (event.packetType) {

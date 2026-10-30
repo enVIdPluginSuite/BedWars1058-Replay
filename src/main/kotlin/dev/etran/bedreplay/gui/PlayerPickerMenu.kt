@@ -7,13 +7,15 @@ import org.bukkit.event.inventory.ClickType
 object PlayerPickerMenu {
     fun open(s: PlaybackSession) {
         val roster = s.roster
-        val rows = ((roster.size + 8) / 9 + 1).coerceIn(2, 6)
+        val viewers = s.otherViewers
+        val rows = ((roster.size + viewers.size + 8) / 9 + 1).coerceIn(2, 6)
         val menu = Menu("§8Teleport to player", rows)
         roster.take((rows - 1) * 9).forEachIndexed { i, info ->
             val alive = s.isAlive(info.entityId)
             val lore = ArrayList<String>()
             lore += if (info.team != null) "§7Team: §f${info.team}" else "§7No team"
-            lore += if (alive) "§aIn the match" else "§cDead or not in the match right now"
+            lore += if (alive) "§aIn the match" else "§cDead or respawning §7(you will follow them when they return)"
+            if (info.uuid.equals(s.viewer.uniqueId.toString(), ignoreCase = true)) lore += "§bThis is you"
             if (s.following == info.entityId) lore += "§eCurrently following"
             lore += ""
             lore += "§eLeft-click: §7teleport"
@@ -23,9 +25,16 @@ object PlayerPickerMenu {
                 if (click == ClickType.SHIFT_LEFT || click == ClickType.SHIFT_RIGHT) {
                     InventoryViewMenus.openPlayer(s, info.entityId); return@set
                 }
-                if (!s.isAlive(info.entityId)) return@set
                 s.teleportTo(info.entityId, camera = click == ClickType.RIGHT || click == ClickType.SHIFT_RIGHT)
                 p.closeInventory()
+            }
+        }
+        var slot = roster.take((rows - 1) * 9).size
+        for (v in viewers) {
+            if (slot >= (rows - 1) * 9) break
+            val lore = listOf(if (v.isHost) "§6Host of this replay" else "§bWatching with you", "", "§eClick: §7teleport to them")
+            menu.set(slot++, Items.head(v.viewer.name, "§b${v.viewer.name} §7(viewer)", lore)) { p, _ ->
+                s.teleportToViewer(v); p.closeInventory()
             }
         }
         val last = rows * 9

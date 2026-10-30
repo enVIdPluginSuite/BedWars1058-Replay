@@ -159,15 +159,29 @@ class RecordingSession(
         )
         spoolFile.parentFile.mkdirs()
         writer = ReplayWriter(FileOutputStream(spoolFile), meta)
+        // BedWars removes the beds of teams nobody joined before the game begins. That happens before this
+        // recording exists, so write the removals explicitly or the replay map would still show those beds.
+        for (team in arena.teams) {
+            if (team.members.isNotEmpty()) continue
+            team.bed?.let { queueBlock(it.blockX, it.blockY, it.blockZ, BlockCodec.AIR) }
+        }
         return true
     }
 
-    private fun skinOf(p: Player): Pair<String?, String?> = try {
-        val user = PacketEvents.getAPI().playerManager.getUser(p)
-        val tex = user?.profile?.textureProperties?.firstOrNull { it.name == "textures" }
-        tex?.value to tex?.signature
-    } catch (_: Throwable) {
-        null to null
+    /**
+     * The player's skin as (value, signature). Tried in order: Paper's profile API, the CraftPlayer game profile
+     * (works on every Spigot / Paper version), then PacketEvents' copy of the login profile, which is often empty.
+     */
+    private fun skinOf(p: Player): Pair<String?, String?> {
+        SkinLookup.paper(p)?.let { return it }
+        SkinLookup.gameProfile(p)?.let { return it }
+        return try {
+            val user = PacketEvents.getAPI().playerManager.getUser(p)
+            val tex = user?.profile?.textureProperties?.firstOrNull { it.name == "textures" }
+            if (tex?.value != null) tex.value to tex.signature else null to null
+        } catch (_: Throwable) {
+            null to null
+        }
     }
 
     fun isParticipant(uuid: UUID) = replayIds.containsKey(uuid)
@@ -210,6 +224,38 @@ class RecordingSession(
         for (b in blocks) queueBlock(b.x, b.y, b.z, BlockCodec.AIR)
     }
 
+    private class Watch(val x: Int, val y: Int, val z: Int, val before: String?, val checkAt: Int)
+    private val watches = ArrayList<Watch>()
+
+    /**
+     * Blocks that something is about to change without telling clients: a dragon eating through walls, a wither,
+     * an explosion another plugin cancels and carries out itself. Their state is remembered now and compared again a
+     * moment later; whatever differs is recorded, whoever did it.
+     */
+    fun watchBlocks(blocks: Collection<org.bukkit.block.Block>) {
+        if (closed || !config.recordBlocks || blocks.isEmpty()) return
+        val first = tick + 1
+        for (b in blocks) {
+            if (b.world.uid != world.uid) continue
+            val before = BlockCodec.current(world, b.x, b.y, b.z)
+            // checked twice: right away, and again once chained effects (falling gravel, fluids) have settled
+            watches += Watch(b.x, b.y, b.z, before, first)
+            watches += Watch(b.x, b.y, b.z, before, first + 4)
+        }
+    }
+
+    private fun checkWatches() {
+        if (watches.isEmpty()) return
+        val it = watches.iterator()
+        while (it.hasNext()) {
+            val w = it.next()
+            if (w.checkAt > tick) continue
+            it.remove()
+            val now = BlockCodec.current(world, w.x, w.y, w.z) ?: continue
+            if (now != w.before) queueBlock(w.x, w.y, w.z, now)
+        }
+    }
+
     // ------------------------------------------------------------------ per-tick work
 
     fun tick() {
@@ -222,6 +268,7 @@ class RecordingSession(
             val visible = ArrayList<PState>(states.size)
             for (st in states.values) if (trackPlayer(st, spectators, actions)) visible += st
             if (config.recordEntities) scanEntities(visible, actions)
+            checkWatches()
             drainBlocks(actions)
             drainChat(actions)
             drainTitles(actions)
@@ -606,35 +653,50 @@ class RecordingSession(
         for (st in states.values) {
             val p = plugin.server.getPlayer(st.uuid) ?: continue
             if (p.world.uid != world.uid) continue
-            val board = try { p.scoreboard } catch (_: Throwable) { null } ?: continue
+            val tracker = ScoreboardRegistry.peek(st.uuid)
+            val packetBased = tracker != null && tracker.seenSidebarPackets
 
-            val teamOf = HashMap<String, org.bukkit.scoreboard.Team>()
-            for (t in board.teams) for (e in t.entries) teamOf[e] = t
+            var title: String? = null
+            var lines: List<String> = emptyList()
+            var tag: Action.Nametag? = null
 
-            val objective = board.getObjective(org.bukkit.scoreboard.DisplaySlot.SIDEBAR)
-            val sidebar = if (objective == null) {
-                Action.Scoreboard(st.id, null, emptyList())
+            if (packetBased) {
+                val view = tracker!!.sidebar()
+                if (view != null) { title = view.title; lines = view.lines }
+                tracker.tag(p.name)?.let { tag = Action.Nametag(st.id, it.prefix, it.suffix, it.hidden) }
             } else {
-                val rows = ArrayList<Pair<Int, String>>()
-                for (entry in board.entries) {
-                    val score = objective.getScore(entry)
-                    if (!score.isScoreSet) continue
-                    val team = teamOf[entry]
-                    rows += score.score to ((team?.prefix ?: "") + entry + (team?.suffix ?: ""))
+                // Plugins that use real Bukkit scoreboards.
+                val board = try { p.scoreboard } catch (_: Throwable) { null } ?: continue
+                val teamOf = HashMap<String, org.bukkit.scoreboard.Team>()
+                for (t in board.teams) for (e in t.entries) teamOf[e] = t
+                val objective = board.getObjective(org.bukkit.scoreboard.DisplaySlot.SIDEBAR)
+                if (objective != null) {
+                    val rows = ArrayList<Pair<Int, String>>()
+                    for (entry in board.entries) {
+                        val score = objective.getScore(entry)
+                        if (!score.isScoreSet) continue
+                        val team = teamOf[entry]
+                        rows += score.score to ((team?.prefix ?: "") + entry + (team?.suffix ?: ""))
+                    }
+                    rows.sortByDescending { it.first }
+                    title = objective.displayName
+                    lines = rows.take(15).map { it.second }
                 }
-                rows.sortByDescending { it.first }
-                Action.Scoreboard(st.id, objective.displayName, rows.take(15).map { it.second })
+                val team = teamOf[p.name]
+                if (team != null) {
+                    val hidden = try { team.nameTagVisibility == org.bukkit.scoreboard.NameTagVisibility.NEVER } catch (_: Throwable) { false }
+                    tag = Action.Nametag(st.id, team.prefix ?: "", team.suffix ?: "", hidden)
+                }
             }
-            val sig = sidebar.title + "\u0000" + sidebar.lines.joinToString("\u0001")
-            if (sig != st.board) { st.board = sig; out += sidebar }
 
-            val team = teamOf[p.name]
-            val hidden = try {
-                team?.nameTagVisibility == org.bukkit.scoreboard.NameTagVisibility.NEVER
-            } catch (_: Throwable) { false }
-            val tag = Action.Nametag(st.id, team?.prefix ?: "", team?.suffix ?: "", hidden)
-            val tagSig = "${tag.prefix}\u0000${tag.suffix}\u0000${tag.hidden}"
-            if (tagSig != st.tag) { st.tag = tagSig; out += tag }
+            val sig = title + "\u0000" + lines.joinToString("\u0001")
+            if (sig != st.board) { st.board = sig; out += Action.Scoreboard(st.id, title, lines) }
+
+            val t = tag
+            if (t != null) {
+                val tagSig = "${t.prefix}\u0000${t.suffix}\u0000${t.hidden}"
+                if (tagSig != st.tag) { st.tag = tagSig; out += t }
+            }
         }
     }
 
@@ -669,7 +731,7 @@ class RecordingSession(
 
     companion object {
         private const val ENTITY_BASE = 1000
-        private const val BOARD_INTERVAL = 10
+        private const val BOARD_INTERVAL = 5
         private const val INVENTORY_INTERVAL = 5
         private const val LIVING_INTERVAL = 5
 

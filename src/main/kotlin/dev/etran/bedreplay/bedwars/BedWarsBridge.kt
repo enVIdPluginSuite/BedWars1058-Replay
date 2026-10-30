@@ -60,6 +60,9 @@ class TeamRef(val handle: Any) {
     val bedDestroyed: Boolean get() = Reflect.call(handle, "isBedDestroyed") as? Boolean ?: false
     val members: List<Player> get() = Reflect.list(handle, "getMembers")
 
+    /** Location of the team's bed (its head block), or null if the plugin does not expose one. */
+    val bed: org.bukkit.Location? get() = Reflect.call(handle, "getBed") as? org.bukkit.Location
+
     /** Team colour as 0xRRGGBB, or -1 if it cannot be determined. */
     val rgb: Int
         get() {

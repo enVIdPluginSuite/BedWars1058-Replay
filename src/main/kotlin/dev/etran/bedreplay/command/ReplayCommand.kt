@@ -2,7 +2,9 @@ package dev.etran.bedreplay.command
 
 import dev.etran.bedreplay.BedReplayPlugin
 import dev.etran.bedreplay.export.AdvancedReplayExporter
+import dev.etran.bedreplay.gui.ActiveReplaysMenu
 import dev.etran.bedreplay.gui.ReplayMenu
+import dev.etran.bedreplay.gui.ReplayServices
 import dev.etran.bedreplay.playback.PlaybackController
 import org.bukkit.Bukkit
 import org.bukkit.command.Command
@@ -20,6 +22,9 @@ class ReplayCommand(
 
     override fun onCommand(sender: CommandSender, cmd: Command, label: String, args: Array<out String>): Boolean {
         val cfg = plugin.settings
+        if (cmd.name.equals("replaysjoin", true) || cmd.name.equals("replaytransfer", true)) {
+            return sharingCommand(sender, cmd.name.lowercase(), args)
+        }
         val sub = args.firstOrNull()?.lowercase()
         if (sub == "reload") {
             if (!sender.hasPermission("bedreplay.admin")) { sender.sendMessage(cfg.msg("no-permission")); return true }
@@ -35,7 +40,8 @@ class ReplayCommand(
             "play" -> {
                 val id = args.getOrNull(1)
                 val r = id?.let { plugin.repository.get(it) }
-                if (r == null || !(sender.hasPermission("bedreplay.admin") || r.hasParticipant(sender.uniqueId))) {
+                val saved = ReplayServices.settings.get(sender.uniqueId).savedSnapshot()
+                if (r == null || !(sender.hasPermission("bedreplay.admin") || r.hasParticipant(sender.uniqueId) || r.id in saved)) {
                     sender.sendMessage(cfg.msg("not-found"))
                 } else playback.start(sender, r)
             }
@@ -43,6 +49,22 @@ class ReplayCommand(
                 if (playback.isWatching(sender)) { sender.sendMessage(cfg.msg("no-permission")); return true }
                 menu().open(sender)
             }
+        }
+        return true
+    }
+
+    private fun sharingCommand(sender: CommandSender, name: String, args: Array<out String>): Boolean {
+        val cfg = plugin.settings
+        if (sender !is Player) { sender.sendMessage("Only players can use this command."); return true }
+        if (!sender.hasPermission("bedreplay.use")) { sender.sendMessage(cfg.msg("no-permission")); return true }
+        if (name == "replaysjoin") {
+            val who = args.firstOrNull()
+            if (who == null) { ActiveReplaysMenu.open(sender); return true }
+            val room = playback.roomOf(who)
+            if (room == null) sender.sendMessage(cfg.msg("join-not-found")) else playback.join(sender, room)
+        } else {
+            val target = args.firstOrNull()
+            if (target == null) sender.sendMessage(cfg.msg("transfer-usage")) else playback.transfer(sender, target)
         }
         return true
     }
@@ -75,6 +97,13 @@ class ReplayCommand(
     }
 
     override fun onTabComplete(sender: CommandSender, cmd: Command, alias: String, args: Array<out String>): List<String> {
+        if (cmd.name.equals("replaysjoin", true) && args.size == 1) {
+            return playback.rooms().map { it.host.viewer.name }.filter { it.startsWith(args[0], true) }
+        }
+        if (cmd.name.equals("replaytransfer", true) && args.size == 1) {
+            val s = (sender as? Player)?.let { playback.session(it) } ?: return emptyList()
+            return s.otherViewers.map { it.viewer.name }.filter { it.startsWith(args[0], true) }
+        }
         if (args.size == 1) {
             val base = mutableListOf("stop")
             if (sender.hasPermission("bedreplay.admin")) { base += "reload"; base += "export" }

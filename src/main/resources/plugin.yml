@@ -11,6 +11,12 @@ commands:
     description: Open your match replays
     usage: /replay [stop|reload|export <id> [world]]
     aliases: [replays, bedreplay]
+  replaysjoin:
+    description: Join a replay another player is watching
+    usage: /replaysjoin [player]
+  replaytransfer:
+    description: Hand the host role of your replay to another viewer
+    usage: /replaytransfer <player>
 permissions:
   bedreplay.use:
     description: Open the replay menu and watch your own matches

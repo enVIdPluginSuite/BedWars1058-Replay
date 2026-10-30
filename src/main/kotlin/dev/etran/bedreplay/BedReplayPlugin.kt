@@ -7,6 +7,8 @@ import dev.etran.bedreplay.config.PluginConfig
 import dev.etran.bedreplay.config.StorageType
 import dev.etran.bedreplay.gui.MenuListener
 import dev.etran.bedreplay.gui.ReplayMenu
+import dev.etran.bedreplay.gui.ReplayServices
+import dev.etran.bedreplay.settings.PlayerSettingsStore
 import dev.etran.bedreplay.playback.PlaybackController
 import dev.etran.bedreplay.playback.PlaybackWorlds
 import dev.etran.bedreplay.record.PacketCapture
@@ -29,6 +31,7 @@ class BedReplayPlugin : JavaPlugin() {
 
     private var recorder: RecordingManager? = null
     private var playback: PlaybackController? = null
+    private var playerSettingsStore: PlayerSettingsStore? = null
     private var capture: PacketCapture? = null
     private var cleanupTask: BukkitTask? = null
 
@@ -69,18 +72,25 @@ class BedReplayPlugin : JavaPlugin() {
         rec.start()
         recorder = rec
 
-        val pc = PacketCapture(rec, logger, settings.recordChat, settings.recordBlocks)
+        val pc = PacketCapture(rec, logger, settings.recordChat, settings.recordBlocks, settings.recordSounds, settings.recordTitles, settings.recordScoreboards)
         PacketEvents.getAPI().eventManager.registerListener(pc)
         capture = pc
 
-        val play = PlaybackController(this, { settings }, repository, bridge)
+        val playerSettings = PlayerSettingsStore(this) { settings }
+        playerSettingsStore = playerSettings
+        val play = PlaybackController(this, { settings }, repository, bridge, playerSettings)
         playback = play
+        ReplayServices.controller = play
+        ReplayServices.settings = playerSettings
+        ReplayServices.repo = repository
         val menu = ReplayMenu({ settings }, repository, play)
         server.pluginManager.registerEvents(play, this)
         server.pluginManager.registerEvents(MenuListener(), this)
 
         val cmd = ReplayCommand(this, { menu }, play)
-        getCommand("replay")?.apply { setExecutor(cmd); tabCompleter = cmd }
+        for (name in listOf("replay", "replaysjoin", "replaytransfer")) {
+            getCommand(name)?.apply { setExecutor(cmd); tabCompleter = cmd }
+        }
 
         scheduleCleanup()
         logger.info("BedWars1058-Replay enabled (${settings.storageType.name.lowercase()} storage).")
@@ -103,8 +113,10 @@ class BedReplayPlugin : JavaPlugin() {
         cleanupTask?.cancel()
         // Viewers first (so nobody loses their inventory), then recordings (saved synchronously).
         playback?.shutdown()
+        playerSettingsStore?.flushAll()
         capture?.let { runCatching { PacketEvents.getAPI().eventManager.unregisterListener(it) } }
         recorder?.shutdown()
+        dev.etran.bedreplay.record.ScoreboardRegistry.clear()
         if (::repository.isInitialized) repository.close()
     }
 }
