@@ -2,22 +2,21 @@
 
 A BedWars1058 add-on (Kotlin, Gradle) that records every match automatically and lets players watch it back in a private copy of the map, Hypixel-style, with hotbar controls to change speed, skip around and follow any player. Minecraft 1.8 up to whatever BedWars1058 itself supports (1.21.x at the time of writing).
 
-**Invisible players keep their name and health on screen, and spectating shows the held item again with a locked look so the hand cannot sway.**
+**Asks BedWars itself to redraw the lobby scoreboard after you leave a replay.**
 
 * Group: `dev.etran` - package `dev.etran.bedreplay`
-* Version: `1.3.1`
+* Version: `1.3.3`
 * Kotlin `2.2.21`, Java 8 bytecode, Gradle (Kotlin DSL), shaded + relocated Kotlin stdlib and HikariCP
 * Required dependency: [`packetevents`](https://github.com/retrooper/packetevents) 2.x (free, actively maintained)
 * Optional: `BedWars1058` (or the `BedWars2023` fork) - without one of them there is nothing to record; `AdvancedReplay` for export
 
 ## What changed in this version
 
-Includes everything in 1.3.0.
+Includes everything in 1.3.2.
 
 **Fixed**
-* **Invisible players now show their name tag and health** - modern clients hide the name tag of an invisible player even when the team says "always show", so the name (with team color and heart row) and the health number now float above an invisible player on invisible armor stands. The body stays invisible, the armor stays visible, and punching the floating text still spectates that player.
-* **Spectating shows the held item again** - the client is no longer switched to spectator mode by default, so your hand shows what the followed player holds. To stop the hand from moving on its own, your look is locked to the followed player's every tick: the hand only sways when *they* look around. Your own body stays invisible and hidden from other viewers, as in 1.3.0.
-* `playback.spectate-client-mode` is now **opt-in** (`false` by default). Turn it on for real client spectator mode: no hand or hotbar at all, with name, health and held item in the action bar.
+* **Lobby scoreboard missing after leaving a replay** - when you leave a replay, the plugin now calls BedWars's own sidebar service (remove, then give) for you, 5 ticks and 2 seconds after you are back in the lobby, instead of only trying to re-point the sidebar slot. The earlier fallback copy still runs if that does not bring it back.
+* Set `debug: true` in `config.yml` to log one line per attempt (`lobby sidebar refresh for <name>: api=<true/false> snapshot=<true/false>`). If the scoreboard is still gone, send that line.
 
 ## Build
 
@@ -27,12 +26,12 @@ Includes everything in 1.3.0.
 
 The included Gradle wrapper pins Gradle 8.14.3, which needs a JDK between 17 and 24 (the plugin itself targets Java 8).
 IntelliJ picks the wrapper up automatically. The server-ready jar is
-`build/libs/BedWars1058-Replay-1.3.1.jar` (the dependency-free shadow jar, not a plain one).
+`build/libs/BedWars1058-Replay-1.3.3.jar` (the dependency-free shadow jar, not a plain one).
 
 ## Install
 
 1. Install PacketEvents and BedWars1058 on the server.
-2. Drop `BedWars1058-Replay-1.3.1.jar` into `plugins/` and **restart** (avoid hot-loading with plugin managers).
+2. Drop `BedWars1058-Replay-1.3.3.jar` into `plugins/` and **restart** (avoid hot-loading with plugin managers).
 3. Play a match - it is recorded automatically. `/replay` afterwards.
 
 ## Commands

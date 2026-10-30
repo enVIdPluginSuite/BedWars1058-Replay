@@ -58,9 +58,10 @@ playback:
   # Invisible players are drawn invisible like in the match, but keep their armor and name tag so you can find them.
   # Health above players' heads: OFF, NUMBER (a number + heart under the name), HEARTS (a row of hearts after the name) or BOTH.
   health-display: BOTH
-  # While spectating a player, tell the client it is in spectator mode: no first-person hand is drawn or swung,
-  # so nothing can look misaligned. Their name, health and held item show in the action bar instead.
-  spectate-client-mode: true
+  # Spectating a player keeps the item they hold in your hand and locks your look to theirs so the hand cannot sway on its own.
+  # true = additionally tell the client it is in real spectator mode: no hand or hotbar is drawn at all, and the
+  # action bar shows the player's name, health and held item instead.
+  spectate-client-mode: false
   # Where viewers are sent when playback ends. Empty = the world they started from.
   return-world: ""
 

@@ -47,8 +47,14 @@ class ScoreboardTracker {
     /** Our own HUD / health objectives are not part of what the player sees in a match. */
     private fun ours(name: String?) = name != null && (name.startsWith("brhud") || name == "brhp")
 
+    private var lastSidebar: String? = null
+
     @Synchronized
     fun sidebarObjective(): String? = sidebar
+
+    /** The sidebar objective most recently shown, even if it has since been removed. */
+    @Synchronized
+    fun lastSidebarObjective(): String? = lastSidebar
 
     @Synchronized
     fun handle(event: PacketSendEvent): Boolean {
@@ -72,6 +78,7 @@ class ScoreboardTracker {
                 if (ours(w.scoreName)) return true
                 if (w.position == SIDEBAR_SLOT) {
                     sidebar = w.scoreName.takeIf { it.isNotEmpty() }
+                    if (sidebar != null) lastSidebar = sidebar
                     seenSidebarPackets = true
                 }
             }

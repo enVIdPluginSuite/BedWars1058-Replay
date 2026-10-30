@@ -223,6 +223,7 @@ class ReplayRoom(
                 if (counter % 10 == 0) m.hud.reassert()
                 if (counter % 20 == 0) m.ensureFlight(force = false)
                 if (m.cameraMode && counter % 20 == 0) m.keepNearFollowed()
+                if (m.cameraMode) m.syncLook()
                 if (m.cameraMode && counter % 10 == 0) {
                     if (config.spectateClientMode) m.spectateInfo() else renderer.showHeld(m.viewer, m.following?.let { sim[it] })
                 }
@@ -349,7 +350,7 @@ class ReplayRoom(
     }
     fun isAlive(rid: Int) = sim.containsKey(rid)
     fun entity(rid: Int): Ent? = sim[rid]
-    fun entityByLive(liveId: Int): Ent? = sim.values.firstOrNull { it.spawned && it.liveId == liveId }
+    fun entityByLive(liveId: Int): Ent? = sim.values.firstOrNull { it.spawned && (it.liveId == liveId || (it.standsShown && it.lineIds.contains(liveId))) }
     fun attachCamera(m: PlaybackSession, e: Ent?) = renderer.camera(m.viewer, e)
 
     // ------------------------------------------------------------------ blocks

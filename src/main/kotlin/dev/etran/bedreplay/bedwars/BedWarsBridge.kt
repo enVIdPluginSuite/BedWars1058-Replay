@@ -218,6 +218,38 @@ class BedWarsBridge(private val plugin: Plugin) {
         return Reflect.call(reg.provider, "getArenaUtil")
     }
 
+    /**
+     * Asks BedWars to draw its own lobby sidebar for [player] again (removes the old one first so it is rebuilt from
+     * scratch). Returns true if a BedWars sidebar service was found and called.
+     */
+    fun refreshLobbySidebar(player: Player): Boolean {
+        val pkg = apiPackage ?: return false
+        val svc = runCatching { Class.forName("$pkg.BedWars", false, loader) }.getOrNull() ?: return false
+        val api = Bukkit.getServicesManager().getRegistration(svc)?.provider ?: return false
+        val mgr = Reflect.call(api, "getScoreboardManager") ?: return false
+        var done = false
+        val methods = mgr.javaClass.methods
+        methods.firstOrNull { it.name == "remove" && it.parameterTypes.size == 1 && it.parameterTypes[0].isAssignableFrom(player.javaClass) }
+            ?.let { runCatching { it.invoke(mgr, player) } }
+        for (m in methods) {
+            if (m.name != "giveSidebar" && m.name != "givePlayerScoreboard") continue
+            val t = m.parameterTypes
+            val args = arrayOfNulls<Any>(t.size)
+            var ok = true
+            for (i in t.indices) when {
+                t[i].isAssignableFrom(player.javaClass) -> args[i] = player
+                t[i] == java.lang.Boolean.TYPE -> args[i] = true
+                !t[i].isPrimitive -> args[i] = null
+                else -> ok = false
+            }
+            if (!ok) continue
+            if (runCatching { m.invoke(mgr, *args) }.onFailure {
+                    plugin.logger.warning("BedWars sidebar refresh failed: " + (it.cause ?: it))
+                }.isSuccess) { done = true; break }
+        }
+        return done
+    }
+
     fun arenaOf(player: Player): ArenaRef? =
         Reflect.call(arenaUtil(), "getArenaByPlayer", player)?.let(::ArenaRef)
 

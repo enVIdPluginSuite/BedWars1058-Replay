@@ -74,6 +74,12 @@ class Ent(val rid: Int, val kind: String) {
 
     /** Entity id the viewer's client knows this entity by (assigned when spawned). */
     var liveId = -1
+
+    /** Invisible players have no name tag on modern clients, so their name and health float on invisible armor stands. */
+    val lineIds = intArrayOf(-1, -1)
+    val lineUuids = arrayOf(UUID.randomUUID(), UUID.randomUUID())
+    var standsShown = false
+    var lineSig: String? = null
     var uuid: UUID = UUID.randomUUID()
     var spawned = false
 }
@@ -218,10 +224,13 @@ class NpcRenderer(
         e.spawned = false
         destroyPackets(e)
         e.tagSent = null
+        e.standsShown = false
+        e.lineSig = null
     }
 
     private fun destroyPackets(e: Ent) {
         send(WrapperPlayServerDestroyEntities(e.liveId))
+        if (e.standsShown) { val ids = standIds(e); if (ids.isNotEmpty()) send(WrapperPlayServerDestroyEntities(*ids)) }
         if (e.isPlayer && e.tagSent != null) send(WrapperPlayServerTeams(teamName(e), WrapperPlayServerTeams.TeamMode.REMOVE, null as WrapperPlayServerTeams.ScoreBoardTeamInfo?))
         if (e.isPlayer && sv.isNewerThanOrEquals(ServerVersion.V_1_19_3)) send(WrapperPlayServerPlayerInfoRemove(e.uuid))
     }
@@ -231,7 +240,7 @@ class NpcRenderer(
     fun teleport(e: Ent) {
         if (!e.spawned) return
         send(WrapperPlayServerEntityTeleport(e.liveId, Location(e.x, e.y, e.z, e.yaw, e.pitch), e.onGround))
-        if (e.isPlayer) send(WrapperPlayServerEntityHeadLook(e.liveId, e.yaw))
+        if (e.isPlayer) { send(WrapperPlayServerEntityHeadLook(e.liveId, e.yaw)); moveStands(e) }
     }
 
     fun equip(e: Ent, slot: Int) {
@@ -278,8 +287,9 @@ class NpcRenderer(
             // 1.8 - 1.12 limit a team suffix to 16 characters
             if (!(sv.isOlderThan(ServerVersion.V_1_13) && suffix.length + row.length > 16)) suffix += row
         }
-        // Invisible players are only findable by their tag, so it stays even if the match hid it.
-        val hidden = e.tagHidden && e.flags and Flag.INVISIBLE == 0
+        // Invisible players show their tag on floating armor stands (modern clients hide the real one), so the real one is off.
+        tagStands(e, prefix, name, suffix)
+        val hidden = e.tagHidden || isInvisible(e)
         val sig = "$prefix|$suffix|$hidden"
         // A viewer who just joined has no team yet, so it must be created for them even if others already have it.
         val first = e.tagSent == null || only != null
@@ -415,12 +425,9 @@ class NpcRenderer(
         metadataExtras(e)
     }
 
-    /** Custom name over a mob / armor stand. Metadata index 2 (name) and 3 (visible) have been stable since 1.8; only the types changed. */
-    fun customName(e: Ent) {
-        if (!e.spawned || e.isPlayer) return
+    /** Entity data for a custom name. Index 2 (name) and 3 (visible) have been stable since 1.8; only the types changed. */
+    private fun nameMeta(name: String, shown: Boolean): List<EntityData<*>> {
         val data = ArrayList<EntityData<*>>(2)
-        val name = e.customName ?: ""
-        val shown = e.nameVisible && name.isNotEmpty()
         when {
             sv.isOlderThan(ServerVersion.V_1_9) -> {
                 data += EntityData(2, EntityDataTypes.STRING, name.take(64))
@@ -438,7 +445,67 @@ class NpcRenderer(
                 data += EntityData(3, EntityDataTypes.BOOLEAN, shown)
             }
         }
-        send(WrapperPlayServerEntityMetadata(e.liveId, data))
+        return data
+    }
+
+    /** Custom name over a mob / armor stand. */
+    fun customName(e: Ent) {
+        if (!e.spawned || e.isPlayer) return
+        val name = e.customName ?: ""
+        send(WrapperPlayServerEntityMetadata(e.liveId, nameMeta(name, e.nameVisible && name.isNotEmpty())))
+    }
+
+    // ------------------------------------------------------------------ floating tag for invisible players
+
+    private fun isInvisible(e: Ent) = e.isPlayer && (e.flags and Flag.INVISIBLE) != 0
+
+    /** An armor stand's name floats at its feet + 1.975 + 0.5, a player's at feet + 1.8 + 0.5; line 2 sits a little lower. */
+    private fun standY(e: Ent, line: Int) = e.y - 0.175 - 0.27 * line
+
+    private fun lineTexts(e: Ent, prefix: String, name: String, suffix: String): List<String> {
+        val list = ArrayList<String>(2)
+        list += prefix + name + suffix
+        if (belowName()) list += "§c" + Math.ceil(e.health.toDouble()).toInt().coerceAtLeast(0) + " ❤"
+        return list
+    }
+
+    /** Shows (or updates, or removes) the floating name / health lines of an invisible player. */
+    private fun tagStands(e: Ent, prefix: String, name: String, suffix: String) {
+        if (!e.spawned || !e.isPlayer) return
+        if (!isInvisible(e)) { if (e.standsShown) removeStands(e); return }
+        val texts = lineTexts(e, prefix, name, suffix)
+        val sig = texts.joinToString("\u0001")
+        val fresh = !e.standsShown || only != null
+        if (!fresh && sig == e.lineSig) return
+        for (i in texts.indices) {
+            if (e.lineIds[i] == -1) e.lineIds[i] = SpigotReflectionUtil.generateEntityId()
+            if (fresh) {
+                send(WrapperPlayServerSpawnEntity(e.lineIds[i], e.lineUuids[i], EntityTypes.ARMOR_STAND,
+                    Location(e.x, standY(e, i), e.z, 0f, 0f), 0f, 0, Vector3d(0.0, 0.0, 0.0)))
+            }
+            val data = ArrayList<EntityData<*>>(3)
+            data += EntityData(0, EntityDataTypes.BYTE, 0x20.toByte()) // invisible
+            data += nameMeta(texts[i], true)
+            send(WrapperPlayServerEntityMetadata(e.lineIds[i], data))
+        }
+        e.standsShown = true
+        e.lineSig = sig
+    }
+
+    private fun standIds(e: Ent): IntArray = e.lineIds.filter { it >= 0 }.toIntArray()
+
+    private fun removeStands(e: Ent) {
+        val ids = standIds(e)
+        if (ids.isNotEmpty()) send(WrapperPlayServerDestroyEntities(*ids))
+        e.standsShown = false
+        e.lineSig = null
+    }
+
+    private fun moveStands(e: Ent) {
+        if (!e.standsShown) return
+        for (i in e.lineIds.indices) if (e.lineIds[i] >= 0 && (i == 0 || belowName())) {
+            send(WrapperPlayServerEntityTeleport(e.lineIds[i], Location(e.x, standY(e, i), e.z, 0f, 0f), false))
+        }
     }
 
     private fun metadataExtras(e: Ent) {

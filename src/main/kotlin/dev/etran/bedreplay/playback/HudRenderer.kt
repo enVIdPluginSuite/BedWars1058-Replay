@@ -80,9 +80,12 @@ class HudRenderer(private val plugin: Plugin, private val viewer: Player) {
     // ------------------------------------------------------------------ sidebar
 
     private companion object {
-        const val OBJ = "brhud"
         const val SIDEBAR_SLOT = 1
+        val counter = java.util.concurrent.atomic.AtomicInteger()
     }
+
+    /** Every HUD gets its own objective name, so two of them (a new replay while a leftover one is still shown) never clash. */
+    private val OBJ = "brhud" + (counter.incrementAndGet() % 10000)
 
     private fun objectiveTitle(title: String) = AdventureSerializer.fromLegacyFormat(clip(title, if (ServerCompat.atLeast(1, 13)) 128 else 32))
 
@@ -111,7 +114,7 @@ class HudRenderer(private val plugin: Plugin, private val viewer: Player) {
                 val existed = i < shownLines
                 if (!existed || lineSigs.getOrNull(i) != lineSig) {
                     val info = WrapperPlayServerTeams.ScoreBoardTeamInfo(
-                        net.kyori.adventure.text.Component.text(OBJ + i),
+                        net.kyori.adventure.text.Component.text("${OBJ}_$i"),
                         AdventureSerializer.fromLegacyFormat(prefix),
                         AdventureSerializer.fromLegacyFormat(suffix),
                         WrapperPlayServerTeams.NameTagVisibility.NEVER,
@@ -119,7 +122,7 @@ class HudRenderer(private val plugin: Plugin, private val viewer: Player) {
                         net.kyori.adventure.text.format.NamedTextColor.WHITE,
                         WrapperPlayServerTeams.OptionData.NONE,
                     )
-                    send(WrapperPlayServerTeams(OBJ + i, if (existed) WrapperPlayServerTeams.TeamMode.UPDATE else WrapperPlayServerTeams.TeamMode.CREATE, info, listOf(entry)))
+                    send(WrapperPlayServerTeams("${OBJ}_$i", if (existed) WrapperPlayServerTeams.TeamMode.UPDATE else WrapperPlayServerTeams.TeamMode.CREATE, info, listOf(entry)))
                     if (i < lineSigs.size) lineSigs[i] = lineSig else lineSigs.add(lineSig)
                 }
                 send(WrapperPlayServerUpdateScore(entry, WrapperPlayServerUpdateScore.Action.CREATE_OR_UPDATE_ITEM, OBJ, Optional.of(shown.size - i)))
@@ -134,7 +137,7 @@ class HudRenderer(private val plugin: Plugin, private val viewer: Player) {
 
     private fun removeLine(i: Int) {
         send(WrapperPlayServerUpdateScore(entryFor(i), WrapperPlayServerUpdateScore.Action.REMOVE_ITEM, OBJ, Optional.empty()))
-        send(WrapperPlayServerTeams(OBJ + i, WrapperPlayServerTeams.TeamMode.REMOVE, null as WrapperPlayServerTeams.ScoreBoardTeamInfo?))
+        send(WrapperPlayServerTeams("${OBJ}_$i", WrapperPlayServerTeams.TeamMode.REMOVE, null as WrapperPlayServerTeams.ScoreBoardTeamInfo?))
     }
 
     /**
@@ -157,10 +160,13 @@ class HudRenderer(private val plugin: Plugin, private val viewer: Player) {
         lineSigs.clear()
     }
 
-    /** A unique invisible score entry per line: a colour code pair that never renders. */
+    /**
+     * A unique invisible score entry per line. Sidebar libraries (BedWars1058 uses one) build their lines from short
+     * colour-code entries too, and a client entry can only be in one team, so ours must never equal theirs.
+     */
     private fun entryFor(i: Int): String {
-        val c = ChatColor.values().filter { it.isColor }[i % 16]
-        return "§${c.char}§r" + (if (i >= 16) "§r" else "")
+        val cs = "0123456789abcdef"
+        return "§r§r§" + cs[i % 16] + "§" + cs[(i * 5 + 3) % 16] + "§r§r"
     }
 
     private fun clip(s: String, max: Int) = if (s.length <= max) s else s.substring(0, max)
@@ -178,17 +184,24 @@ class HudRenderer(private val plugin: Plugin, private val viewer: Player) {
     /**
      * Ends the HUD and hands the sidebar slot back to whatever the player had before the replay (the BedWars lobby
      * sidebar is drawn with packets the server does not know about, so it has to be pointed at again explicitly).
+     * Always done, even if our own sidebar happened to be hidden at that moment: removing it empties the slot too.
      */
-    fun close() {
+    fun close(clearTitles: Boolean = true) {
         try {
-            clearTitles()
-            val had = created
+            if (clearTitles) clearTitles()
             hideSidebar()
-            if (viewer.isOnline && had) {
-                val original = ScoreboardRegistry.peek(viewer.uniqueId)?.sidebarObjective()
+            if (viewer.isOnline) {
+                val tracker = ScoreboardRegistry.peek(viewer.uniqueId)
+                val original = tracker?.sidebarObjective() ?: tracker?.lastSidebarObjective() ?: bukkitSidebarName()
                 if (original != null) send(WrapperPlayServerDisplayScoreboard(SIDEBAR_SLOT, original))
             }
         } catch (_: Throwable) {
         }
+    }
+
+    private fun bukkitSidebarName(): String? = try {
+        viewer.scoreboard.getObjective(org.bukkit.scoreboard.DisplaySlot.SIDEBAR)?.name
+    } catch (_: Throwable) {
+        null
     }
 }

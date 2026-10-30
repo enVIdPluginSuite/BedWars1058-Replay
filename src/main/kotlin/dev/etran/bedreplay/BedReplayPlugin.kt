@@ -41,6 +41,7 @@ class BedReplayPlugin : JavaPlugin() {
         settings = PluginConfig(config)
 
         val bridge = BedWarsBridge(this)
+        dev.etran.bedreplay.playback.LobbyBoardGuard.bridge = bridge
         if (!bridge.detect()) {
             logger.severe("BedWars1058 (or BedWars2023) was not found; BedReplay cannot record or play matches.")
             server.pluginManager.disablePlugin(this)

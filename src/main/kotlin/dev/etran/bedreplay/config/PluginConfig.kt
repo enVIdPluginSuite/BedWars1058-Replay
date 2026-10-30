@@ -62,7 +62,7 @@ class PluginConfig(private val c: FileConfiguration) {
     /** OFF, NUMBER (below the name), HEARTS (a heart row after the name) or BOTH. */
     val healthDisplay = (c.getString("playback.health-display", "BOTH") ?: "BOTH").uppercase().let { if (it in setOf("OFF", "NUMBER", "HEARTS", "BOTH")) it else "BOTH" }
     /** While spectating, tell the client it is in spectator mode so no hand / item is drawn or swung. */
-    val spectateClientMode = c.getBoolean("playback.spectate-client-mode", true)
+    val spectateClientMode = c.getBoolean("playback.spectate-client-mode", false)
     val sharingDefaultAllowJoin = c.getBoolean("sharing.default-allow-join", false)
     val sharingDefaultWhitelistOnly = c.getBoolean("sharing.default-whitelist-only", false)
     val sharingDefaultGuestSave = c.getBoolean("sharing.default-guest-save", false)
@@ -74,6 +74,8 @@ class PluginConfig(private val c: FileConfiguration) {
     val adminMenuTitle = color(c.getString("menu.admin-title", "&8Match Replays &c(admin)")!!)
 
     private val messages = HashMap<String, String>().also { map ->
+        // Messages added by a newer version are missing from an older config.yml on disk, so start from the bundled ones.
+        c.defaults?.getConfigurationSection("messages")?.let { d -> d.getKeys(false).forEach { map[it] = d.getString(it) ?: "" } }
         val section = c.getConfigurationSection("messages")
         section?.getKeys(false)?.forEach { map[it] = section.getString(it) ?: "" }
     }

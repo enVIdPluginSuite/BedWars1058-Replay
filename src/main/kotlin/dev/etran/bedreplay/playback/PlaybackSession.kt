@@ -8,6 +8,7 @@ import dev.etran.bedreplay.format.TitleKind
 import dev.etran.bedreplay.util.Visibility
 import com.github.retrooper.packetevents.PacketEvents
 import com.github.retrooper.packetevents.wrapper.play.server.WrapperPlayServerChangeGameState
+import com.github.retrooper.packetevents.wrapper.play.server.WrapperPlayServerPlayerPositionAndLook
 import org.bukkit.potion.PotionEffect
 import org.bukkit.potion.PotionEffectType
 import dev.etran.bedreplay.gui.Items
@@ -58,7 +59,12 @@ class PlaybackSession(
 
     // ------------------------------------------------------------------ entering and leaving
 
+    /** What the viewer's sidebar showed before the replay (the lobby sidebar), to put back if it got lost. */
+    private var lobbyView: dev.etran.bedreplay.record.SidebarView? = null
+
     fun enter(at: Location) {
+        lobbyView = LobbyBoardGuard.cancel(viewer.uniqueId)
+            ?: dev.etran.bedreplay.record.ScoreboardRegistry.peek(viewer.uniqueId)?.sidebar()
         val file = ViewerState.fileFor(stateDir, viewer.uniqueId)
         saved = ViewerState.capture(viewer).also { it.save(file) }
         viewer.inventory.clear()
@@ -94,6 +100,7 @@ class PlaybackSession(
         state.apply(viewer)
         if (config.spectateClientMode) sendClientMode(realMode())
         ViewerState.fileFor(dir, viewer.uniqueId).delete()
+        LobbyBoardGuard.check(plugin, viewer, lobbyView)
     }
 
     /** Leaves the replay. For the host this also hands the room to someone else, or closes it. */
@@ -302,6 +309,21 @@ class PlaybackSession(
             viewer.allowFlight = false
             viewer.allowFlight = true
             viewer.isFlying = true
+        } catch (_: Throwable) {
+        }
+    }
+
+    /**
+     * The mouse still turns the viewer's own (invisible) body while the camera sits on the followed player, which makes
+     * the first-person hand sway on its own. Snap the body's look back to the followed player's every tick, so the hand
+     * only moves when the followed player looks around.
+     */
+    fun syncLook() {
+        if (!cameraMode) return
+        val e = following?.let { room.entity(it) } ?: return
+        try {
+            PacketEvents.getAPI().playerManager.sendPacket(viewer,
+                WrapperPlayServerPlayerPositionAndLook(0.0, 0.0, 0.0, e.yaw, e.pitch, 0x07.toByte(), 0, false))
         } catch (_: Throwable) {
         }
     }
