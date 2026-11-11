@@ -261,13 +261,6 @@ class BedWarsBridge(private val plugin: Plugin) {
 
     fun arenas(): List<ArenaRef> = Reflect.list<Any>(arenaUtil(), "getArenas").map(::ArenaRef)
 
-    /** Folder BedWars keeps zipped arena templates in (default internal map adapter). */
-    fun templateZip(arenaName: String): java.io.File? {
-        val owner = CANDIDATES.firstNotNullOfOrNull { Bukkit.getPluginManager().getPlugin(it.first) } ?: return null
-        val f = java.io.File(owner.dataFolder, "Cache/$arenaName.zip")
-        return if (f.isFile) f else null
-    }
-
     /** Finds the pristine map of an arena in MapLoader's library, BedWars' own cache or the server root. */
     val templates by lazy { MapTemplates(plugin) }
 

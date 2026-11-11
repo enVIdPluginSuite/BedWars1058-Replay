@@ -119,7 +119,7 @@ class PlaybackController(
         repo.loadAsync(r.id) { replay ->
             if (replay == null) return@loadAsync abort("load-failed")
             if (!viewer.isOnline) return@loadAsync abort("load-failed")
-            PlaybackWorlds.prepare(plugin, bridge, cfg.worldPrefix, r.id, r.arena) { world ->
+            PlaybackWorlds.prepare(plugin, bridge, cfg.worldPrefix, r.id, r.arena, r.group) { world ->
                 if (world == null) return@prepare abort("map-missing")
                 if (!viewer.isOnline) {
                     PlaybackWorlds.destroy(plugin, world); return@prepare abort("load-failed")
