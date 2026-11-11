@@ -52,11 +52,14 @@ class RecordingManager(
     private fun scan() {
         val cfg = config()
         if (!cfg.recordingEnabled || !cfg.autoDetect) return
-        for (arena in bridge.arenas()) {
+        val arenas = bridge.arenas()
+        // Arenas are replaced after every game (and by MapLoader when it wakes a parked one); forget the old objects.
+        if (seenPlaying.isNotEmpty()) seenPlaying.retainAll(arenas.toSet())
+        for (arena in arenas) {
             if (!arena.status.equals("playing", true)) { seenPlaying.remove(arena); continue }
             if (sessions.containsKey(arena) || arena in seenPlaying) continue
+            if (arena.players.isEmpty()) continue // not started yet: look again next time
             seenPlaying.add(arena)
-            if (arena.players.isEmpty()) continue
             plugin.logger.info("Detected running match on ${arena.name} (group ${arena.group ?: "-"}); starting recording")
             begin(arena)
         }
