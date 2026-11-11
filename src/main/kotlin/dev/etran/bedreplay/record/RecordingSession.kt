@@ -71,6 +71,8 @@ class RecordingSession(
     private val blockShadow = HashMap<Long, String>()
 
     private val entities = HashMap<Int, EState>()
+    /** Position of a recorded hologram stand -> its entity id, so duplicate per-language stands are recorded once. */
+    private val hologramOwner = HashMap<Triple<Long, Long, Long>, Int>()
     private val seen = HashSet<Int>()
     private val scratch = Location(null, 0.0, 0.0, 0.0)
 
@@ -413,6 +415,7 @@ class RecordingSession(
             }
             val kind = kindOf(e) ?: continue
             val live = e.entityId
+            if (e is ArmorStand && !e.isVisible && !trackHologram(e)) continue
             seen += live
             val loc = e.getLocation(scratch)
             val qx = quant(loc.x); val qy = quant(loc.y); val qz = quant(loc.z)
@@ -464,10 +467,25 @@ class RecordingSession(
     private fun kindOf(e: Entity): String? {
         val type = e.type.name
         if (type in SKIPPED) return null
-        // Invisible armour stands are BedWars holograms/name tags; without their metadata they would
-        // replay as visible empty stands, so leave them out.
-        if (e is ArmorStand && !e.isVisible) return null
         return LEGACY_KINDS[type] ?: type.lowercase()
+    }
+
+    /**
+     * Invisible armour stands are BedWars holograms: generator tier and timer lines, shop names, and the spinning
+     * item over a generator. Those with a name or an item are recorded (with the invisible flag, see trackLiving) so
+     * a replay shows what the match showed. The game makes one set of stands per language at the same spot, so only
+     * the first stand at a position is kept. Returns false for stands that should not be recorded.
+     */
+    private fun trackHologram(e: ArmorStand): Boolean {
+        val named = !e.customName.isNullOrBlank()
+        val eq = e.equipment
+        val holds = eq != null && (eq.helmet != null && eq.helmet!!.type != org.bukkit.Material.AIR)
+        if (!named && !holds) return false
+        val key = Triple(Math.round(e.location.x * 10), Math.round(e.location.y * 10), Math.round(e.location.z * 10))
+        val owner = hologramOwner[key]
+        if (owner != null && owner != e.entityId && entities.containsKey(owner)) return false
+        hologramOwner[key] = e.entityId
+        return true
     }
 
     // ------------------------------------------------------------------ packet-derived data
@@ -506,7 +524,7 @@ class RecordingSession(
     private fun trackLiving(e: LivingEntity, st: EState, out: MutableList<Action>) {
         var flags = 0
         if (e.fireTicks > 0) flags = flags or Flag.BURNING
-        if (e.hasPotionEffect(PotionEffectType.INVISIBILITY)) flags = flags or Flag.INVISIBLE
+        if (e.hasPotionEffect(PotionEffectType.INVISIBILITY) || (e is ArmorStand && !e.isVisible)) flags = flags or Flag.INVISIBLE
         if (flags != st.flags) {
             if (st.flags != -1 || flags != 0) out += Action.Flags(st.rid, flags)
             st.flags = flags
