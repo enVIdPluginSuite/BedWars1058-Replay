@@ -134,17 +134,40 @@ object ServerCompat {
         } catch (_: Throwable) { null }
     }
 
+    /**
+     * Minecraft 26.1 renamed every game rule ("doDaylightCycle" -> "advance_time", ...). The classic call then
+     * quietly does nothing, so a replay world would keep its day/night cycle, weather, fire spread and mob spawning.
+     */
+    private val RULE_ALIASES = mapOf(
+        "dodaylightcycle" to "advance_time",
+        "doweathercycle" to "advance_weather",
+        "domobspawning" to "spawn_mobs",
+        "dofiretick" to "fire_spread_radius_around_player",
+        "mobgriefing" to "mob_griefing",
+    )
+
     fun gameRule(world: World, rule: String, value: Boolean) {
         try {
-            if (setGameRuleModern != null) {
-                // 1.13+ takes a typed GameRule; look the constant up reflectively by its legacy string name
-                val rules = Class.forName("org.bukkit.GameRule")
-                val gr = rules.getMethod("getByName", String::class.java).invoke(null, rule)
-                if (gr != null) { setGameRuleModern.invoke(world, gr, value); return }
-            }
             @Suppress("DEPRECATION")
-            setGameRule?.invoke(world, rule, value.toString())
+            if (setGameRule?.invoke(world, rule, value.toString()) == true) return
         } catch (_: Throwable) {
         }
-    }
-}
+        try {
+            val ruleClass = Class.forName("org.bukkit.GameRule")
+            val set = setGameRuleModern ?: return
+            val wanted = RULE_ALIASES[rule.lowercase()] ?: rule.replace(Regex("([A-Z])")) { "_" + it.value.lowercase() }
+            val all = ruleClass.getMethod("values").invoke(null) as Array<*>
+            val getName = ruleClass.getMethod("getName")
+            val gr = all.firstOrNull { r ->
+                val n = (getName.invoke(r) as String).removePrefix("minecraft:")
+                n.equals(wanted, true) || n.equals(rule, true)
+            } ?: run { ruleClass.getMethod("getByName", String::class.java).invoke(null, rule) } ?: return
+            val type = ruleClass.getMethod("getType").invoke(gr) as Class<*>
+            val parsed: Any = if (type == java.lang.Integer::class.java) {
+                // a numeric rule (fire spread radius): "off" means 0, "on" means the default
+                if (value) ruleClass.getMethod("getDefaultValue").invoke(gr) else 0
+            } else value
+            set.invoke(world, gr, parsed)
+        } catch (_: Throwable) {
+        }
+    }}
