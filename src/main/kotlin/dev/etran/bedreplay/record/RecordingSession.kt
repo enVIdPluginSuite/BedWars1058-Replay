@@ -184,6 +184,14 @@ class RecordingSession(
         }
     }
 
+    /** Gives up on a session that failed to start: closes the file and removes the half-written spool. */
+    fun abort() {
+        closed = true
+        try { writer?.close() } catch (_: Throwable) { }
+        writer = null
+        spoolFile.delete()
+    }
+
     fun isParticipant(uuid: UUID) = replayIds.containsKey(uuid)
     fun wantsPackets(uuid: UUID) = !closed && inWorld[uuid] == true
 

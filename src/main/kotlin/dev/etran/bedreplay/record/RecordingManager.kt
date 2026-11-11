@@ -87,7 +87,7 @@ class RecordingManager(
             "playing" -> {
                 if (!config().recordingEnabled) return
                 // Teams and spawns are assigned right after the state flips, so start a moment later.
-                Bukkit.getScheduler().runTaskLater(plugin, Runnable { begin(arena) }, 2L)
+                Bukkit.getScheduler().runTaskLater(plugin, Runnable { if (plugin.isEnabled) begin(arena) }, 2L)
             }
             "restarting" -> sessions[arena]?.let { s ->
                 if (s.endAtTick < 0) s.endAtTick = s.tick + config().postGameSeconds * 20
@@ -149,7 +149,14 @@ class RecordingManager(
             return
         }
         val s = RecordingSession(plugin, config(), arena, world, spoolDir)
-        if (!s.start()) return
+        val started = try {
+            s.start()
+        } catch (t: Throwable) {
+            plugin.logger.log(Level.SEVERE, "Could not start recording ${arena.name}", t)
+            s.abort()
+            false
+        }
+        if (!started) return
         sessions[arena] = s
         byWorld[world.uid] = s
         for (p in arena.players) byPlayer[p.uniqueId] = s
@@ -159,6 +166,8 @@ class RecordingManager(
     private fun tickAll() {
         if (sessions.isEmpty()) return
         for (s in ArrayList(sessions.values)) {
+            // The arena world can be unloaded under a running session (arena disabled or restarted without an event).
+            if (Bukkit.getWorld(s.world.uid) == null) { finish(s); continue }
             s.tick()
             if (s.endAtTick in 0..s.tick) finish(s)
         }
@@ -169,14 +178,16 @@ class RecordingManager(
         byWorld.remove(s.world.uid, s)
         byPlayer.entries.removeIf { it.value === s }
 
+        var failed = false
         val meta: ReplayMeta? = try {
             s.finish()
         } catch (t: Throwable) {
-            plugin.logger.log(Level.SEVERE, "Failed to close recording ${s.id}", t)
+            failed = true
+            plugin.logger.log(Level.SEVERE, "Failed to close recording ${s.id}; the spool file ${s.spoolFile.name} is kept and recovered on the next start", t)
             null
         }
         if (meta == null) {
-            plugin.logger.info("Discarded recording ${s.id} (too short)")
+            if (!failed) plugin.logger.info("Discarded recording ${s.id} (too short)")
             return
         }
         val notify = {
