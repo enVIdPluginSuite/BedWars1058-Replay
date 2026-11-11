@@ -130,8 +130,12 @@ class RecordingManager(
         sessions[arena]?.marker(MarkerKind.TEAM_ELIMINATED, "$team was eliminated")
     }
 
-    override fun onArenaDisabled(arenaName: String) {
-        sessions.entries.firstOrNull { it.key.name.equals(arenaName, true) }?.value?.let { finish(it) }
+    override fun onArenaDisabled(arenaName: String, worldName: String?) {
+        // Several instances of one arena share its name, so match on the world; the name only when the event has none.
+        val hit = ArrayList(sessions.values).filter { s ->
+            if (!worldName.isNullOrEmpty()) s.world.name.equals(worldName, true) else s.arena.name.equals(arenaName, true)
+        }
+        for (s in hit) finish(s)
     }
 
     private fun begin(arena: ArenaRef) {

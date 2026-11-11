@@ -118,7 +118,7 @@ interface BedWarsCallbacks {
     fun onTeamEliminated(arena: ArenaRef, team: String) {}
     fun onRespawn(arena: ArenaRef, player: Player) {}
     fun onLeave(arena: ArenaRef, player: Player) {}
-    fun onArenaDisabled(arenaName: String) {}
+    fun onArenaDisabled(arenaName: String, worldName: String?) {}
 }
 
 class BedWarsBridge(private val plugin: Plugin) {
@@ -207,11 +207,13 @@ class BedWarsBridge(private val plugin: Plugin) {
             val player = Reflect.call(e, "getPlayer") as? Player ?: return@on
             callbacks.onLeave(arena, player)
         }
+        // Several instances of one arena share its name (auto-scale clones, arenas MapLoader re-creates), so the world
+        // name is what tells them apart.
         on("server.ArenaDisableEvent") { e ->
-            callbacks.onArenaDisabled(Reflect.str(e, "getArenaName") ?: return@on)
+            callbacks.onArenaDisabled(Reflect.str(e, "getArenaName") ?: return@on, Reflect.str(e, "getWorldName"))
         }
         on("server.ArenaRestartEvent") { e ->
-            callbacks.onArenaDisabled(Reflect.str(e, "getArenaName") ?: return@on)
+            callbacks.onArenaDisabled(Reflect.str(e, "getArenaName") ?: return@on, Reflect.str(e, "getWorldName"))
         }
     }
 
