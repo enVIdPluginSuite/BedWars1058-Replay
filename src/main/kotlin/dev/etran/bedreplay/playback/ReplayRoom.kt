@@ -182,8 +182,10 @@ class ReplayRoom(
         ended = true
         task?.cancel()
         sim.clear()
-        // Give any teleports a moment to complete before the world is unloaded.
-        Bukkit.getScheduler().runTaskLater(plugin, Runnable { PlaybackWorlds.destroy(plugin, world) }, 5L)
+        // Give any teleports a moment to complete before the world is unloaded. While the plugin is being disabled the
+        // scheduler refuses new tasks, so the world is removed right away (viewers were already sent back).
+        if (plugin.isEnabled) Bukkit.getScheduler().runTaskLater(plugin, Runnable { PlaybackWorlds.destroy(plugin, world) }, 5L)
+        else PlaybackWorlds.destroy(plugin, world)
         onEnded(this)
     }
 
