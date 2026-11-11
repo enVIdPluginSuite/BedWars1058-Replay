@@ -303,6 +303,8 @@ class PlaybackController(
     fun onCommand(e: PlayerCommandPreprocessEvent) {
         if (!isActive(e.player.uniqueId) || e.player.hasPermission("bedreplay.admin")) return
         val cmd = e.message.trim().removePrefix("/").substringBefore(' ').lowercase().substringAfter(':')
+        // BedWars' /leave and /l send players to the lobby; for a viewer that means ending the replay
+        if (cmd in LEAVE_COMMANDS) { e.isCancelled = true; active(e.player.uniqueId)?.stop(); return }
         if (cmd !in ALLOWED_COMMANDS) { e.isCancelled = true }
     }
 
@@ -347,6 +349,7 @@ class PlaybackController(
     fun onQuit(e: PlayerQuitEvent) {
         val id = e.player.uniqueId
         lastClick.remove(id)
+        pendingInput.remove(id)
         // The saved state file stays on disk and is restored on the next join.
         active(id)?.stop(restore = false)
     }
@@ -373,5 +376,6 @@ class PlaybackController(
 
     private companion object {
         val ALLOWED_COMMANDS = setOf("replay", "replays", "bedreplay", "replaysjoin", "replaytransfer")
+        val LEAVE_COMMANDS = setOf("leave", "l")
     }
 }
