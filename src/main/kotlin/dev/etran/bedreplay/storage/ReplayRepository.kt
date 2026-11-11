@@ -23,8 +23,18 @@ class ReplayRepository(
     @Volatile
     private var index: List<StoredReplay> = emptyList()
 
+    /** Index updates come from several storage threads at once; each read-modify-write must not lose the other's change. */
+    private val indexLock = Any()
+
+    private fun updateIndex(f: (List<StoredReplay>) -> List<StoredReplay>) {
+        synchronized(indexLock) { index = f(index) }
+    }
+
     /** Replays currently being watched; retention never deletes these mid-playback. */
     private val inUse: MutableSet<String> = ConcurrentHashMap.newKeySet()
+
+    /** Held while a replay is deleted and while one is marked in use, so the two can never interleave. */
+    private val useLock = Any()
 
     fun init() {
         storage.init()
@@ -53,7 +63,7 @@ class ReplayRepository(
     fun refreshAsync(after: (() -> Unit)? = null) {
         async {
             val fresh = storage.list()
-            index = fresh
+            synchronized(indexLock) { index = fresh }
             if (after != null) sync(after)
         }
     }
@@ -84,12 +94,17 @@ class ReplayRepository(
     fun cleanupExpired() = async {
         val now = System.currentTimeMillis()
         for (r in index) {
-            if (r.expiresAtMillis == 0L || r.expiresAtMillis > now || r.id in inUse) continue
-            runCatching { storage.delete(r.id) }
-                .onSuccess { plugin.logger.info("Deleted expired replay ${r.id}") }
-                .onFailure { plugin.logger.log(Level.WARNING, "Could not delete expired replay ${r.id}", it) }
+            if (r.expiresAtMillis == 0L || r.expiresAtMillis > now) continue
+            val deleted = synchronized(useLock) {
+                if (r.id in inUse) return@synchronized false
+                runCatching { storage.delete(r.id) }
+                    .onFailure { plugin.logger.log(Level.WARNING, "Could not delete expired replay ${r.id}", it) }
+                    .getOrDefault(false)
+            }
+            if (deleted) plugin.logger.info("Deleted expired replay ${r.id}")
         }
-        index = storage.list()
+        val fresh = storage.list()
+        synchronized(indexLock) { index = fresh }
     }
 
     // ------------------------------------------------------------------ mutations
@@ -97,7 +112,7 @@ class ReplayRepository(
     /** Blocking save; used on the recording thread and during server shutdown. */
     fun saveBlocking(spool: File, meta: ReplayMeta): StoredReplay {
         val stored = storage.save(spool, meta, defaultExpiry())
-        index = index.filterNot { it.id == stored.id } + stored
+        updateIndex { list -> list.filterNot { it.id == stored.id } + stored }
         return stored
     }
 
@@ -112,8 +127,9 @@ class ReplayRepository(
     }
 
     fun deleteAsync(id: String, done: (Boolean) -> Unit) = async {
-        val ok = runCatching { storage.delete(id) }.getOrDefault(false)
-        if (ok) index = index.filterNot { it.id == id }
+        // an expiry sweep or another admin may have removed it already; a replay somebody is watching stays
+        val ok = synchronized(useLock) { id !in inUse && runCatching { storage.delete(id) }.getOrDefault(false) }
+        if (ok) updateIndex { list -> list.filterNot { it.id == id } }
         sync { done(ok) }
     }
 
@@ -121,7 +137,7 @@ class ReplayRepository(
         val ok = runCatching { storage.setExpiry(id, expiresAt) }.getOrDefault(false)
         var updated: StoredReplay? = null
         if (ok) {
-            index = index.map { if (it.id == id) it.copy(expiresAtMillis = expiresAt).also { u -> updated = u } else it }
+            updateIndex { list -> list.map { if (it.id == id) it.copy(expiresAtMillis = expiresAt).also { u -> updated = u } else it } }
         }
         sync { done(updated) }
     }
@@ -136,27 +152,21 @@ class ReplayRepository(
         sync { done(replay) }
     }
 
-    fun acquire(id: String) { inUse += id }
-    fun release(id: String) { inUse -= id }
+    fun acquire(id: String) { synchronized(useLock) { inUse += id } }
+    fun release(id: String) { synchronized(useLock) { inUse -= id } }
 
     // ------------------------------------------------------------------ threading helpers
 
     private fun async(block: () -> Unit) {
-        try {
-            Bukkit.getScheduler().runTaskAsynchronously(plugin, Runnable {
-                try { block() } catch (t: Throwable) { plugin.logger.log(Level.WARNING, "Replay storage task failed", t) }
-            })
-        } catch (_: IllegalStateException) {
-            block() // scheduler unavailable (shutting down): run inline
+        val task = Runnable {
+            try { block() } catch (t: Throwable) { plugin.logger.log(Level.WARNING, "Replay storage task failed", t) }
         }
+        // once the plugin is disabled the scheduler refuses new tasks: run inline (server shutting down)
+        if (plugin.isEnabled) Bukkit.getScheduler().runTaskAsynchronously(plugin, task) else task.run()
     }
 
     private fun sync(block: () -> Unit) {
-        try {
-            Bukkit.getScheduler().runTask(plugin, Runnable(block))
-        } catch (_: IllegalStateException) {
-            block()
-        }
+        if (plugin.isEnabled) Bukkit.getScheduler().runTask(plugin, Runnable(block)) else block()
     }
 
     companion object {
