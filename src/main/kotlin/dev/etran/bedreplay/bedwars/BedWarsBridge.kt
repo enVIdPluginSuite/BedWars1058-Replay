@@ -268,7 +268,10 @@ class BedWarsBridge(private val plugin: Plugin) {
         return if (f.isFile) f else null
     }
 
-    private companion object {
+    /** Finds the pristine map of an arena in MapLoader's library, BedWars' own cache or the server root. */
+    val templates by lazy { MapTemplates(plugin) }
+
+    internal companion object {
         val CANDIDATES = listOf(
             "BedWars1058" to "com.andrei1058.bedwars.api",
             "BedWars2023" to "com.tomkeuper.bedwars.api",
