@@ -54,7 +54,18 @@ class ViewerState(
         c.set("allowFlight", allowFlight); c.set("flying", flying); c.set("flySpeed", flySpeed.toDouble())
         c.set("health", health); c.set("food", food); c.set("exp", exp.toDouble()); c.set("level", level)
         file.parentFile.mkdirs()
-        c.save(file)
+        // Written next to the target and moved into place: a crash half way must never leave a corrupt file, because
+        // this file is the only copy of the viewer's inventory while the replay runs.
+        val tmp = File(file.parentFile, file.name + ".tmp")
+        c.save(tmp)
+        try {
+            java.nio.file.Files.move(
+                tmp.toPath(), file.toPath(),
+                java.nio.file.StandardCopyOption.REPLACE_EXISTING, java.nio.file.StandardCopyOption.ATOMIC_MOVE,
+            )
+        } catch (_: java.nio.file.AtomicMoveNotSupportedException) {
+            java.nio.file.Files.move(tmp.toPath(), file.toPath(), java.nio.file.StandardCopyOption.REPLACE_EXISTING)
+        }
     }
 
     companion object {
