@@ -9,6 +9,7 @@ import org.bukkit.event.Listener
 import org.bukkit.plugin.EventExecutor
 import org.bukkit.plugin.Plugin
 import java.lang.reflect.Method
+import java.util.Optional
 import java.util.concurrent.ConcurrentHashMap
 import java.util.logging.Level
 
@@ -20,18 +21,21 @@ import java.util.logging.Level
  * versions. Every call is wrapped so a changed signature degrades a feature instead of crashing.
  */
 internal object Reflect {
-    private val cache = ConcurrentHashMap<String, Method?>()
+    /** Resolved methods; a lookup that found nothing is remembered too (ConcurrentHashMap cannot hold null). */
+    private val cache = ConcurrentHashMap<String, Optional<Method>>()
 
     fun call(target: Any?, name: String, vararg args: Any?): Any? {
         if (target == null) return null
         // Overloads (e.g. isReSpawning(Player) vs isReSpawning(UUID)) must be told apart by argument type.
         val key = "${target.javaClass.name}#$name/" + args.joinToString(",") { it?.javaClass?.name ?: "null" }
-        val m = cache.getOrPut(key) {
-            target.javaClass.methods.firstOrNull { m ->
-                m.name == name && m.parameterCount == args.size &&
-                    m.parameterTypes.indices.all { i -> args[i] == null || wrap(m.parameterTypes[i]).isInstance(args[i]) }
-            }?.also { runCatching { it.isAccessible = true } }
-        } ?: return null
+        val m = cache.computeIfAbsent(key) {
+            Optional.ofNullable(
+                target.javaClass.methods.firstOrNull { m ->
+                    m.name == name && m.parameterCount == args.size &&
+                        m.parameterTypes.indices.all { i -> args[i] == null || wrap(m.parameterTypes[i]).isInstance(args[i]) }
+                }?.also { runCatching { it.isAccessible = true } },
+            )
+        }.orElse(null) ?: return null
         return try {
             m.invoke(target, *args)
         } catch (_: Throwable) {
