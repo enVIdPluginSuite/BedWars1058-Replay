@@ -103,7 +103,7 @@ class NpcRenderer(
 ) {
     private val pm = PacketEvents.getAPI().playerManager
     private val sv: ServerVersion = PacketEvents.getAPI().serverManager.version
-    private var warned = false
+    private val warned = HashSet<String>()
 
     /** While set, packets go to this one viewer only (a viewer joining late, or leaving). */
     private var only: Player? = null
@@ -114,9 +114,9 @@ class NpcRenderer(
             try {
                 pm.sendPacket(p, w)
             } catch (t: Throwable) {
-                if (!warned) {
-                    warned = true
-                    plugin.logger.log(Level.WARNING, "Replay packet could not be sent (${w.javaClass.simpleName}); further failures are silent", t)
+                // once per packet type, so one unsupported packet does not hide the failures of the others
+                if (warned.add(w.javaClass.simpleName)) {
+                    plugin.logger.log(Level.WARNING, "Replay packet could not be sent (${w.javaClass.simpleName}); further failures of it are silent", t)
                 }
             }
         }
@@ -393,13 +393,40 @@ class NpcRenderer(
     fun animate(e: Ent, anim: Int) {
         if (!e.spawned) return
         when (anim) {
-            Anim.SWING_MAIN -> send(WrapperPlayServerEntityAnimation(e.liveId, WrapperPlayServerEntityAnimation.EntityAnimationType.SWING_MAIN_ARM))
-            Anim.SWING_OFF -> send(WrapperPlayServerEntityAnimation(e.liveId, WrapperPlayServerEntityAnimation.EntityAnimationType.SWING_OFF_HAND))
+            Anim.SWING_MAIN -> swing(e, false)
+            Anim.SWING_OFF -> swing(e, true)
             Anim.CRIT -> send(WrapperPlayServerEntityAnimation(e.liveId, WrapperPlayServerEntityAnimation.EntityAnimationType.CRITICAL_HIT))
             Anim.MAGIC_CRIT -> send(WrapperPlayServerEntityAnimation(e.liveId, WrapperPlayServerEntityAnimation.EntityAnimationType.MAGIC_CRITICAL_HIT))
             Anim.HURT -> send(WrapperPlayServerEntityStatus(e.liveId, 2))
             Anim.DEATH -> send(WrapperPlayServerEntityStatus(e.liveId, 3))
             else -> {}
+        }
+    }
+
+    /** 26.x moved arm swings out of the entity animation packet into their own packet; PacketEvents 2.14 wraps it. */
+    private val modernSwing: Boolean = run {
+        val major = Regex("V_(\\d+)_").find(sv.name)?.groupValues?.get(1)?.toIntOrNull() ?: 0
+        major >= 26 && try { Class.forName(SWING_PACKET); true } catch (_: Throwable) { false }
+    }
+
+    private fun swing(e: Ent, offHand: Boolean) {
+        if (!modernSwing) {
+            send(WrapperPlayServerEntityAnimation(e.liveId, if (offHand) WrapperPlayServerEntityAnimation.EntityAnimationType.SWING_OFF_HAND else WrapperPlayServerEntityAnimation.EntityAnimationType.SWING_MAIN_ARM))
+            return
+        }
+        // reflection: the plugin is compiled against a PacketEvents that does not have this packet yet
+        try {
+            val typeClass = Class.forName("com.github.retrooper.packetevents.protocol.component.builtin.item.ItemSwingAnimation\$Type")
+            val whack = typeClass.enumConstants.first { (it as Enum<*>).name == "WHACK" }
+            val anim = Class.forName("com.github.retrooper.packetevents.protocol.component.builtin.item.ItemSwingAnimation")
+                .getConstructor(typeClass, Int::class.javaPrimitiveType).newInstance(whack, 6)
+            val hand = if (offHand) com.github.retrooper.packetevents.protocol.player.InteractionHand.OFF_HAND else com.github.retrooper.packetevents.protocol.player.InteractionHand.MAIN_HAND
+            val packet = Class.forName(SWING_PACKET)
+                .getConstructor(Int::class.javaPrimitiveType, com.github.retrooper.packetevents.protocol.player.InteractionHand::class.java, anim.javaClass)
+                .newInstance(e.liveId, hand, anim) as PacketWrapper<*>
+            send(packet)
+        } catch (t: Throwable) {
+            if (warned.add("swing")) plugin.logger.log(Level.WARNING, "Replay could not build the arm swing packet; swings are not shown", t)
         }
     }
 
@@ -543,6 +570,9 @@ class NpcRenderer(
     }
 
     private companion object {
+        const val SWING_PACKET = "com.github.retrooper.packetevents.wrapper.play.server.WrapperPlayServerSwingAnimation"
+        /** Shown after the raw health number. */
+        const val HEALTH_LABEL = "§cHP"
         val PALETTE = listOf(
             '0' to 0x000000, '1' to 0x0000AA, '2' to 0x00AA00, '3' to 0x00AAAA, '4' to 0xAA0000, '5' to 0xAA00AA,
             '6' to 0xFFAA00, '7' to 0xAAAAAA, '8' to 0x555555, '9' to 0x5555FF, 'a' to 0x55FF55, 'b' to 0x55FFFF,
