@@ -335,7 +335,7 @@ class NpcRenderer(
                 pm.sendPacket(p, com.github.retrooper.packetevents.wrapper.play.server.WrapperPlayServerScoreboardObjective(
                     healthObjectiveName(),
                     com.github.retrooper.packetevents.wrapper.play.server.WrapperPlayServerScoreboardObjective.ObjectiveMode.CREATE,
-                    AdventureSerializer.fromLegacyFormat("§c❤"),
+                    AdventureSerializer.fromLegacyFormat(HEALTH_LABEL),
                     com.github.retrooper.packetevents.wrapper.play.server.WrapperPlayServerScoreboardObjective.RenderType.INTEGER,
                 ))
                 pm.sendPacket(p, com.github.retrooper.packetevents.wrapper.play.server.WrapperPlayServerDisplayScoreboard(2, healthObjectiveName()))
@@ -351,14 +351,14 @@ class NpcRenderer(
             pm.sendPacket(p, com.github.retrooper.packetevents.wrapper.play.server.WrapperPlayServerScoreboardObjective(
                 healthObjectiveName(),
                 com.github.retrooper.packetevents.wrapper.play.server.WrapperPlayServerScoreboardObjective.ObjectiveMode.REMOVE,
-                AdventureSerializer.fromLegacyFormat("§c❤"),
+                AdventureSerializer.fromLegacyFormat(HEALTH_LABEL),
                 com.github.retrooper.packetevents.wrapper.play.server.WrapperPlayServerScoreboardObjective.RenderType.INTEGER,
             ))
         } catch (_: Throwable) {
         }
     }
 
-    /** The number under the name (health + a red heart); a score is looked up by the player's name. */
+    /** The raw health number under the name (out of 20); a score is looked up by the player's name. */
     private fun healthScore(e: Ent) {
         if (!belowName() || !e.spawned || !e.isPlayer) return
         ensureHealthObjective()
@@ -492,7 +492,7 @@ class NpcRenderer(
     private fun lineTexts(e: Ent, prefix: String, name: String, suffix: String): List<String> {
         val list = ArrayList<String>(2)
         list += prefix + name + suffix
-        if (belowName()) list += "§c" + Math.ceil(e.health.toDouble()).toInt().coerceAtLeast(0) + " ❤"
+        if (belowName()) list += "§c" + Math.ceil(e.health.toDouble()).toInt().coerceAtLeast(0) + " " + HEALTH_LABEL
         return list
     }
 

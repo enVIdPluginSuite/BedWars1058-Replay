@@ -76,8 +76,12 @@ class PluginConfig(private val c: FileConfiguration) {
     val defaultSpeed = c.getDouble("playback.default-speed", 1.0)
     val skipSeconds = c.getInt("playback.skip-seconds", 10).coerceAtLeast(1)
     val playSounds = c.getBoolean("playback.play-sounds", true)
-    /** OFF, NUMBER (below the name), HEARTS (a heart row after the name) or BOTH. */
-    val healthDisplay = (c.getString("playback.health-display", "BOTH") ?: "BOTH").uppercase().let { if (it in setOf("OFF", "NUMBER", "HEARTS", "BOTH")) it else "BOTH" }
+    /**
+     * OFF, NUMBER (the raw health number under the name), HEARTS (a heart row after the name) or BOTH.
+     * Read from health-mode: the old health-display key defaulted to BOTH and is not read anymore, so configs
+     * written by older versions show the number instead of hearts.
+     */
+    val healthDisplay = (c.getString("playback.health-mode", "NUMBER") ?: "NUMBER").uppercase().let { if (it in setOf("OFF", "NUMBER", "HEARTS", "BOTH")) it else "NUMBER" }
     /** While spectating, tell the client it is in spectator mode so no hand / item is drawn or swung. */
     val spectateClientMode = c.getBoolean("playback.spectate-client-mode", false)
     val sharingDefaultAllowJoin = c.getBoolean("sharing.default-allow-join", false)
